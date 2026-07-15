@@ -170,9 +170,8 @@ class WorkflowEngine {
   }
 
   // Execute an entire workflow
-  async runWorkflow(workflowName, workflowInputs = {}) {
+  async runWorkflow(workflowName, workflowInputs = {}, runId = uuidv4()) {
     const workflow = this.loadWorkflow(workflowName);
-    const runId = uuidv4();
     const runFilePath = path.join(this.runsDir, `${runId}.json`);
     
     const runRecord = {
