@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ToolFlow | Workflow Automation Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo-icon">TF</div>
+        <h1>ToolFlow</h1>
+      </div>
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="dashboard">
+          <svg class="nav-icon" viewBox="0 0 24 24" width="24" height="24"><path fill="none" d="M0 0h24v24H0z"/><path d="M13 21V11h8v10h-8zM3 13V3h8v10H3zm10-4V3h8v6h-8zM3 21v-6h8v6H3z" fill="currentColor"/></svg>
+          Dashboard
+        </button>
+        <button class="nav-item" data-tab="workflows">
+          <svg class="nav-icon" viewBox="0 0 24 24" width="24" height="24"><path fill="none" d="M0 0h24v24H0z"/><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-2-12v4H8v2h6v-2h-2v-4h2V8H8v2h2z" fill="currentColor"/></svg>
+          Workflows
+        </button>
+        <button class="nav-item" data-tab="tools">
+          <svg class="nav-icon" viewBox="0 0 24 24" width="24" height="24"><path fill="none" d="M0 0h24v24H0z"/><path d="M12 1l9.5 5.5v11L12 23l-9.5-5.5v-11L12 1zm0 2.311L4.5 7.653v8.694l7.5 4.342 7.5-4.342V7.653L12 3.311zM12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" fill="currentColor"/></svg>
+          Custom Tools
+        </button>
+        <button class="nav-item" data-tab="runs">
+          <svg class="nav-icon" viewBox="0 0 24 24" width="24" height="24"><path fill="none" d="M0 0h24v24H0z"/><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm0-2a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm1-8h4v2h-6V7h2v5z" fill="currentColor"/></svg>
+          Run History
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="status-indicator online"></span>
+        <span class="version">Engine v1.0.0</span>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top header bar -->
+      <header class="top-bar">
+        <h2 id="page-title">Overview</h2>
+        <div class="stats-panel">
+          <div class="stat-card">
+            <span class="stat-label">Total Runs</span>
+            <span id="stat-total" class="stat-val">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Success Rate</span>
+            <span id="stat-rate" class="stat-val">0%</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- View Containers -->
+      <div class="view-viewport">
+        <!-- Dashboard Overview Tab -->
+        <section id="view-dashboard" class="tab-view active">
+          <div class="dashboard-grid">
+            <div class="overview-left">
+              <div class="dashboard-banner">
+                <h3>Welcome back to ToolFlow</h3>
+                <p>Orchestrate, chain, and monitor custom CLI tools & HTTP APIs from a unified, modern command desk.</p>
+              </div>
+              <div class="quick-runs-section">
+                <h4 class="section-title">Trigger Workflows</h4>
+                <div id="quick-workflows-list" class="grid-layout">
+                  <!-- JS populated -->
+                </div>
+              </div>
+            </div>
+            
+            <div class="overview-right">
+              <div class="recent-activity-panel glass">
+                <h4 class="section-title">Recent Run History</h4>
+                <div id="recent-runs-list" class="recent-list">
+                  <!-- JS populated -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Workflows Tab -->
+        <section id="view-workflows" class="tab-view">
+          <div id="workflows-grid" class="grid-layout">
+            <!-- JS populated -->
+          </div>
+        </section>
+
+        <!-- Tools Tab -->
+        <section id="view-tools" class="tab-view">
+          <div id="tools-grid" class="grid-layout">
+            <!-- JS populated -->
+          </div>
+        </section>
+
+        <!-- Runs Tab -->
+        <section id="view-runs" class="tab-view">
+          <div class="runs-container glass">
+            <table class="runs-table">
+              <thead>
+                <tr>
+                  <th>Run ID</th>
+                  <th>Workflow</th>
+                  <th>Triggered At</th>
+                  <th>Duration</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="runs-table-body">
+                <!-- JS populated -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Run Detail Drawer Overlay -->
+  <div id="run-drawer" class="drawer-overlay">
+    <div class="drawer">
+      <div class="drawer-header">
+        <div>
+          <h3 id="drawer-title">Workflow Run Details</h3>
+          <span id="drawer-run-id" class="drawer-sub">run-id</span>
+        </div>
+        <button id="close-drawer" class="close-btn">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <div class="run-meta-row">
+          <div class="meta-item">
+            <span class="meta-label">Status</span>
+            <span id="drawer-status" class="status-badge">PENDING</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Triggered At</span>
+            <span id="drawer-time" class="meta-val">-</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Duration</span>
+            <span id="drawer-duration" class="meta-val">-</span>
+          </div>
+        </div>
+
+        <div class="steps-section">
+          <h4>Execution Steps Flow</h4>
+          <div id="drawer-steps-list" class="steps-timeline">
+            <!-- JS populated -->
+          </div>
+        </div>
+
+        <div class="logs-section">
+          <h4>Engine & Tool Console Logs</h4>
+          <div class="terminal-container">
+            <div class="terminal-header">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+              <span class="terminal-title">console.log</span>
+            </div>
+            <pre id="drawer-logs" class="terminal-content">Initializing logs...</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trigger Modal with Inputs -->
+  <div id="trigger-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-title">Trigger Workflow</h3>
+        <button id="close-modal" class="close-btn">&times;</button>
+      </div>
+      <form id="trigger-form">
+        <div id="modal-inputs-container" class="modal-inputs">
+          <!-- JS populated -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="cancel-trigger" class="btn secondary">Cancel</button>
+          <button type="submit" class="btn primary">Execute Run</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
