@@ -1,0 +1,28 @@
+{
+  "name": "toolflow",
+  "version": "1.0.0",
+  "description": "Workflow Automation Engine for Custom CLI & API Tools",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node tests/engine.test.js"
+  },
+  "keywords": [
+    "automation",
+    "workflow",
+    "orchestrator",
+    "cli",
+    "api",
+    "tools"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "js-yaml": "^4.1.0",
+    "uuid": "^10.0.0"
+  }
+}
