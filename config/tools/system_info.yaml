@@ -1,0 +1,16 @@
+name: system_info
+description: Fetch local CPU load, RAM usage, and disk space details
+type: script
+scriptPath: scripts/system_info.js
+inputs:
+  - name: verbose
+    type: boolean
+    description: Print detailed logs
+    default: false
+outputs:
+  - name: cpuLoad
+    type: number
+  - name: freeMemory
+    type: number
+  - name: diskUsage
+    type: string

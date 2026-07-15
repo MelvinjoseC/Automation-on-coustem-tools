@@ -1,0 +1,17 @@
+name: health_check_alert
+description: Check local system metrics and check website availability
+inputs:
+  - name: pingUrl
+    type: string
+    description: Website URL to check
+    default: https://httpbin.org/status/200
+steps:
+  - id: check_local_system
+    tool: system_info
+    inputs:
+      verbose: true
+  - id: ping_website
+    tool: http_ping
+    inputs:
+      url: ${workflow.inputs.pingUrl}
+      timeout: 3000

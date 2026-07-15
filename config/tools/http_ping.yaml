@@ -1,0 +1,19 @@
+name: http_ping
+description: Test health of an HTTP endpoint and capture response metrics
+type: api
+inputs:
+  - name: url
+    type: string
+    description: URL to check
+    required: true
+  - name: timeout
+    type: number
+    description: Connection timeout in milliseconds
+    default: 5000
+outputs:
+  - name: status
+    type: number
+  - name: statusText
+    type: string
+  - name: latencyMs
+    type: number
