@@ -1,0 +1,18 @@
+name: disk_usage
+description: Analyze disk space utilization and flag low-space warnings
+type: script
+scriptPath: scripts/disk_usage.js
+inputs:
+  - name: thresholdPercent
+    type: number
+    description: Flag a warning if disk usage percent exceeds this
+    default: 80
+outputs:
+  - name: totalGb
+    type: number
+  - name: freeGb
+    type: number
+  - name: usedPercent
+    type: number
+  - name: warningTriggered
+    type: boolean
