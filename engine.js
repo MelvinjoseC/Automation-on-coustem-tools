@@ -1,0 +1,321 @@
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+const https = require('https');
+const http = require('http');
+const yaml = require('js-yaml');
+const { v4: uuidv4 } = require('uuid');
+
+class WorkflowEngine {
+  constructor(baseDir) {
+    this.baseDir = baseDir;
+    this.toolsDir = path.join(baseDir, 'config', 'tools');
+    this.workflowsDir = path.join(baseDir, 'config', 'workflows');
+    this.runsDir = path.join(baseDir, 'runs');
+    
+    if (!fs.existsSync(this.runsDir)) {
+      fs.mkdirSync(this.runsDir, { recursive: true });
+    }
+  }
+
+  // Load a tool by name
+  loadTool(name) {
+    const yamlPath = path.join(this.toolsDir, `${name}.yaml`);
+    if (!fs.existsSync(yamlPath)) {
+      throw new Error(`Tool "${name}" not found at ${yamlPath}`);
+    }
+    return yaml.load(fs.readFileSync(yamlPath, 'utf8'));
+  }
+
+  // Load a workflow by name
+  loadWorkflow(name) {
+    const yamlPath = path.join(this.workflowsDir, `${name}.yaml`);
+    if (!fs.existsSync(yamlPath)) {
+      throw new Error(`Workflow "${name}" not found at ${yamlPath}`);
+    }
+    return yaml.load(fs.readFileSync(yamlPath, 'utf8'));
+  }
+
+  // Resolve template variables like ${workflow.inputs.foo} or ${steps.bar.outputs.baz}
+  resolveValue(value, context) {
+    if (typeof value !== 'string') return value;
+    
+    const regex = /\${(.*?)}/g;
+    
+    // If the entire string is a single expression, we want to return its raw type (e.g. number, boolean, object)
+    const exactMatch = value.match(/^\${(.*?)}$/);
+    if (exactMatch) {
+      return this.evaluateExpression(exactMatch[1], context);
+    }
+    
+    // Otherwise, interpolate it into the string
+    return value.replace(regex, (m, expression) => {
+      const val = this.evaluateExpression(expression, context);
+      return val !== undefined ? String(val) : m;
+    });
+  }
+  
+  evaluateExpression(expression, context) {
+    const parts = expression.split('.');
+    let current = context;
+    for (const part of parts) {
+      if (current === undefined || current === null) return undefined;
+      current = current[part];
+    }
+    return current;
+  }
+
+  // Helper to execute script tool
+  executeScriptTool(tool, inputs, logCallback) {
+    return new Promise((resolve, reject) => {
+      const scriptPath = path.join(this.baseDir, tool.scriptPath);
+      if (!fs.existsSync(scriptPath)) {
+        return reject(new Error(`Script not found at ${scriptPath}`));
+      }
+
+      logCallback(`[SYSTEM] Spawning process: node ${tool.scriptPath}`);
+      
+      const args = [scriptPath];
+      // Format inputs as arguments e.g., --verbose or value
+      Object.keys(inputs).forEach(key => {
+        const val = inputs[key];
+        if (typeof val === 'boolean') {
+          if (val) args.push(`--${key}`);
+        } else {
+          args.push(`--${key}`, String(val));
+        }
+      });
+
+      const child = spawn('node', args);
+      let stdoutData = '';
+      let stderrData = '';
+
+      child.stdout.on('data', (data) => {
+        stdoutData += data.toString();
+      });
+
+      child.stderr.on('data', (data) => {
+        const lines = data.toString().split('\n');
+        lines.forEach(line => {
+          if (line.trim()) logCallback(`[SCRIPT] ${line.trim()}`);
+        });
+        stderrData += data.toString();
+      });
+
+      child.on('close', (code) => {
+        logCallback(`[SYSTEM] Process exited with status code ${code}`);
+        if (code !== 0) {
+          return reject(new Error(`Script failed with status code ${code}. Error: ${stderrData.trim()}`));
+        }
+        
+        try {
+          const parsed = JSON.parse(stdoutData.trim());
+          resolve(parsed);
+        } catch (e) {
+          logCallback(`[WARNING] Failed to parse script output as JSON. Returning raw string.`);
+          resolve({ rawOutput: stdoutData.trim() });
+        }
+      });
+    });
+  }
+
+  // Helper to execute API tool
+  executeApiTool(tool, inputs, logCallback) {
+    return new Promise((resolve, reject) => {
+      const urlStr = inputs.url;
+      if (!urlStr) {
+        return reject(new Error(`API tool requires a "url" input.`));
+      }
+
+      logCallback(`[SYSTEM] Sending HTTP request to ${urlStr}`);
+      const startTime = Date.now();
+      
+      try {
+        const urlObj = new URL(urlStr);
+        const protocol = urlObj.protocol === 'https:' ? https : http;
+        const options = {
+          method: 'GET',
+          timeout: inputs.timeout || 5000
+        };
+
+        const req = protocol.request(urlObj, options, (res) => {
+          let body = '';
+          res.on('data', (chunk) => body += chunk);
+          res.on('end', () => {
+            const latencyMs = Date.now() - startTime;
+            logCallback(`[API] Response: ${res.statusCode} ${res.statusMessage} (${latencyMs}ms)`);
+            resolve({
+              status: res.statusCode,
+              statusText: res.statusMessage,
+              latencyMs,
+              body: body.substring(0, 1000)
+            });
+          });
+        });
+
+        req.on('timeout', () => {
+          req.destroy();
+          reject(new Error(`API request timed out after ${options.timeout}ms`));
+        });
+
+        req.on('error', (err) => {
+          reject(err);
+        });
+
+        req.end();
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  // Execute an entire workflow
+  async runWorkflow(workflowName, workflowInputs = {}) {
+    const workflow = this.loadWorkflow(workflowName);
+    const runId = uuidv4();
+    const runFilePath = path.join(this.runsDir, `${runId}.json`);
+    
+    const runRecord = {
+      runId,
+      workflowName,
+      status: 'RUNNING',
+      startTime: new Date().toISOString(),
+      endTime: null,
+      inputs: workflowInputs,
+      steps: {},
+      logs: []
+    };
+
+    const log = (msg) => {
+      const timestamp = new Date().toISOString();
+      const logLine = `[${timestamp}] ${msg}`;
+      runRecord.logs.push(logLine);
+      console.log(`[Run ${runId.substring(0, 8)}] ${msg}`);
+      fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+    };
+
+    log(`Starting workflow "${workflow.name}"`);
+
+    const context = {
+      workflow: {
+        inputs: { ...workflowInputs }
+      },
+      steps: {}
+    };
+
+    if (workflow.inputs) {
+      workflow.inputs.forEach(input => {
+        if (context.workflow.inputs[input.name] === undefined && input.default !== undefined) {
+          context.workflow.inputs[input.name] = input.default;
+        }
+      });
+    }
+
+    log(`Workflow inputs: ${JSON.stringify(context.workflow.inputs)}`);
+
+    try {
+      for (const step of workflow.steps) {
+        log(`Executing step "${step.id}" (Tool: ${step.tool})`);
+        
+        runRecord.steps[step.id] = {
+          status: 'RUNNING',
+          startTime: new Date().toISOString(),
+          endTime: null,
+          error: null
+        };
+        fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+
+        const tool = this.loadTool(step.tool);
+        
+        const resolvedInputs = {};
+        if (step.inputs) {
+          Object.keys(step.inputs).forEach(key => {
+            resolvedInputs[key] = this.resolveValue(step.inputs[key], context);
+          });
+        }
+
+        if (tool.inputs) {
+          tool.inputs.forEach(ti => {
+            if (resolvedInputs[ti.name] === undefined && ti.default !== undefined) {
+              resolvedInputs[ti.name] = ti.default;
+            }
+            if (ti.required && resolvedInputs[ti.name] === undefined) {
+              throw new Error(`Required tool input "${ti.name}" was not provided for step "${step.id}"`);
+            }
+          });
+        }
+
+        let outputs;
+        if (tool.type === 'script') {
+          outputs = await this.executeScriptTool(tool, resolvedInputs, log);
+        } else if (tool.type === 'api') {
+          outputs = await this.executeApiTool(tool, resolvedInputs, log);
+        } else {
+          throw new Error(`Unsupported tool type: ${tool.type}`);
+        }
+
+        runRecord.steps[step.id].status = 'SUCCESS';
+        runRecord.steps[step.id].endTime = new Date().toISOString();
+        runRecord.steps[step.id].outputs = outputs;
+        
+        context.steps[step.id] = { outputs };
+        
+        log(`Step "${step.id}" completed successfully`);
+        fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+      }
+
+      runRecord.status = 'SUCCESS';
+      log(`Workflow "${workflow.name}" completed successfully.`);
+    } catch (error) {
+      runRecord.status = 'FAILED';
+      runRecord.error = error.message;
+      log(`Workflow execution failed: ${error.message}`);
+      
+      const activeStepId = Object.keys(runRecord.steps).find(id => runRecord.steps[id].status === 'RUNNING');
+      if (activeStepId) {
+        runRecord.steps[activeStepId].status = 'FAILED';
+        runRecord.steps[activeStepId].endTime = new Date().toISOString();
+        runRecord.steps[activeStepId].error = error.message;
+      }
+    } finally {
+      runRecord.endTime = new Date().toISOString();
+      fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+    }
+
+    return runRecord;
+  }
+  
+  getRun(runId) {
+    const runFilePath = path.join(this.runsDir, `${runId}.json`);
+    if (fs.existsSync(runFilePath)) {
+      return JSON.parse(fs.readFileSync(runFilePath, 'utf8'));
+    }
+    return null;
+  }
+
+  listRuns() {
+    if (!fs.existsSync(this.runsDir)) return [];
+    return fs.readdirSync(this.runsDir)
+      .filter(file => file.endsWith('.json'))
+      .map(file => {
+        try {
+          const content = fs.readFileSync(path.join(this.runsDir, file), 'utf8');
+          const data = JSON.parse(content);
+          return {
+            runId: data.runId,
+            workflowName: data.workflowName,
+            status: data.status,
+            startTime: data.startTime,
+            endTime: data.endTime,
+            error: data.error
+          };
+        } catch (e) {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+  }
+}
+
+module.exports = WorkflowEngine;
