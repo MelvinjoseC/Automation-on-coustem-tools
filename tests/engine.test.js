@@ -214,6 +214,71 @@ async function testStepRetries() {
   }
 }
 
+async function testConditionalSteps() {
+  console.log('Testing: Conditional Steps...');
+  const engine = new WorkflowEngine(path.join(__dirname, '..'));
+
+  engine.loadWorkflow = (name) => {
+    if (name === 'conditional_workflow') {
+      return {
+        name: 'conditional_workflow',
+        steps: [
+          {
+            id: 'step1',
+            tool: 'mock_tool',
+            inputs: { value: 'yes' }
+          },
+          {
+            id: 'step2',
+            tool: 'mock_tool',
+            if: '${steps.step1.outputs.value} == yes',
+            inputs: { value: 'run_me' }
+          },
+          {
+            id: 'step3',
+            tool: 'mock_tool',
+            if: '${steps.step1.outputs.value} == no',
+            inputs: { value: 'skip_me' }
+          }
+        ]
+      };
+    }
+  };
+
+  engine.loadTool = (name) => {
+    if (name === 'mock_tool') {
+      return {
+        name: 'mock_tool',
+        type: 'script',
+        scriptPath: 'tests/echo_helper.js'
+      };
+    }
+  };
+
+  const helperPath = path.join(__dirname, 'echo_helper.js');
+  fs.writeFileSync(helperPath, `
+    const args = process.argv;
+    const valIndex = args.indexOf('--value');
+    const val = valIndex !== -1 ? args[valIndex + 1] : '';
+    console.log(JSON.stringify({ value: val }));
+  `);
+
+  try {
+    const result = await engine.runWorkflow('conditional_workflow');
+    assert.strictEqual(result.status, 'SUCCESS');
+    assert.strictEqual(result.steps.step1.status, 'SUCCESS');
+    assert.strictEqual(result.steps.step2.status, 'SUCCESS');
+    assert.strictEqual(result.steps.step3.status, 'SKIPPED');
+    assert.strictEqual(result.steps.step2.outputs.value, 'run_me');
+    assert.strictEqual(result.steps.step3.outputs, undefined);
+    console.log('✓ Conditional Steps Passed\n');
+  } finally {
+    if (fs.existsSync(helperPath)) {
+      fs.unlinkSync(helperPath);
+    }
+  }
+}
+
 async function runAll() {
   try {
     await testVariableResolution();
@@ -222,6 +287,7 @@ async function runAll() {
     await testApiAdvancedFeatures();
     await testStepTimeouts();
     await testStepRetries();
+    await testConditionalSteps();
     console.log('All tests passed successfully!');
     process.exit(0);
   } catch (err) {
