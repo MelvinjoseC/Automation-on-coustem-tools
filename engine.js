@@ -288,13 +288,30 @@ class WorkflowEngine {
         }
 
         const stepTimeout = step.timeout;
+        const retries = typeof step.retries === 'number' ? step.retries : 0;
+        const retryDelay = typeof step.retryDelay === 'number' ? step.retryDelay : 1000;
         let outputs;
-        if (tool.type === 'script') {
-          outputs = await this.executeScriptTool(tool, resolvedInputs, log, stepTimeout);
-        } else if (tool.type === 'api') {
-          outputs = await this.executeApiTool(tool, resolvedInputs, log, stepTimeout);
-        } else {
-          throw new Error(`Unsupported tool type: ${tool.type}`);
+        let attempt = 0;
+
+        while (true) {
+          try {
+            if (tool.type === 'script') {
+              outputs = await this.executeScriptTool(tool, resolvedInputs, log, stepTimeout);
+            } else if (tool.type === 'api') {
+              outputs = await this.executeApiTool(tool, resolvedInputs, log, stepTimeout);
+            } else {
+              throw new Error(`Unsupported tool type: ${tool.type}`);
+            }
+            break; // Success, exit retry loop
+          } catch (err) {
+            attempt++;
+            if (attempt <= retries) {
+              log(`[WARNING] Step "${step.id}" failed: ${err.message}. Retrying (Attempt ${attempt}/${retries}) in ${retryDelay}ms...`);
+              await new Promise(r => setTimeout(r, retryDelay));
+            } else {
+              throw err; // Out of retries, propagate error
+            }
+          }
         }
 
         runRecord.steps[step.id].status = 'SUCCESS';
