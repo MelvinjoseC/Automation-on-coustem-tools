@@ -79,6 +79,19 @@ app.get('/api/runs/:runId', (req, res) => {
   }
 });
 
+// API: Delete a specific run
+app.delete('/api/runs/:runId', (req, res) => {
+  try {
+    const deleted = engine.deleteRun(req.params.runId);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Run not found' });
+    }
+    res.json({ success: true, message: 'Run deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // API: Trigger a workflow run
 app.post('/api/workflows/:name/run', (req, res) => {
   const { name } = req.params;

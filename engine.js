@@ -390,6 +390,15 @@ class WorkflowEngine {
     return null;
   }
 
+  deleteRun(runId) {
+    const runFilePath = path.join(this.runsDir, `${runId}.json`);
+    if (fs.existsSync(runFilePath)) {
+      fs.unlinkSync(runFilePath);
+      return true;
+    }
+    return false;
+  }
+
   listRuns() {
     if (!fs.existsSync(this.runsDir)) return [];
     return fs.readdirSync(this.runsDir)
