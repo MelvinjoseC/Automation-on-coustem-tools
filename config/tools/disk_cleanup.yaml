@@ -1,0 +1,13 @@
+name: disk_cleanup
+description: Trigger custom automated directory purging
+type: script
+scriptPath: scripts/disk_cleanup.js
+inputs:
+  - name: targetPath
+    type: string
+    required: true
+outputs:
+  - name: cleaned
+    type: boolean
+  - name: freedBytes
+    type: number
