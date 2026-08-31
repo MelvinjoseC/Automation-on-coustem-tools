@@ -107,12 +107,61 @@ async function testApiAdvancedFeatures() {
   console.log('✓ API Advanced Features Passed\n');
 }
 
+async function testStepTimeouts() {
+  console.log('Testing: Step Timeouts...');
+  const engine = new WorkflowEngine(path.join(__dirname, '..'));
+
+  // Mock loadWorkflow and loadTool
+  engine.loadWorkflow = (name) => {
+    if (name === 'timeout_workflow') {
+      return {
+        name: 'timeout_workflow',
+        steps: [
+          {
+            id: 'sleep_step',
+            tool: 'mock_sleep_tool',
+            timeout: 500 // 500ms timeout
+          }
+        ]
+      };
+    }
+  };
+
+  engine.loadTool = (name) => {
+    if (name === 'mock_sleep_tool') {
+      return {
+        name: 'mock_sleep_tool',
+        type: 'script',
+        scriptPath: 'tests/sleep_helper.js'
+      };
+    }
+  };
+
+  // Write a temporary helper script that sleeps for 2 seconds
+  const helperPath = path.join(__dirname, 'sleep_helper.js');
+  fs.writeFileSync(helperPath, 'setTimeout(() => { console.log(JSON.stringify({ok: true})); }, 2000);');
+
+  try {
+    const result = await engine.runWorkflow('timeout_workflow');
+    assert.strictEqual(result.status, 'FAILED');
+    assert.ok(result.error.includes('timed out'));
+    assert.strictEqual(result.steps.sleep_step.status, 'FAILED');
+    assert.ok(result.steps.sleep_step.error.includes('timed out'));
+    console.log('✓ Step Timeouts Passed\n');
+  } finally {
+    if (fs.existsSync(helperPath)) {
+      fs.unlinkSync(helperPath);
+    }
+  }
+}
+
 async function runAll() {
   try {
     await testVariableResolution();
     await testWorkflowLoading();
     await testEngineExecution();
     await testApiAdvancedFeatures();
+    await testStepTimeouts();
     console.log('All tests passed successfully!');
     process.exit(0);
   } catch (err) {
