@@ -151,6 +151,19 @@ class WorkflowEngine {
           }
         }
 
+        let reqBody = null;
+        if (inputs.body !== undefined && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method)) {
+          if (typeof inputs.body === 'object') {
+            reqBody = JSON.stringify(inputs.body);
+            if (!options.headers['content-type'] && !options.headers['Content-Type']) {
+              options.headers['Content-Type'] = 'application/json';
+            }
+          } else {
+            reqBody = String(inputs.body);
+          }
+          options.headers['Content-Length'] = Buffer.byteLength(reqBody);
+        }
+
         const req = protocol.request(urlObj, options, (res) => {
           let body = '';
           res.on('data', (chunk) => body += chunk);
@@ -175,6 +188,9 @@ class WorkflowEngine {
           reject(err);
         });
 
+        if (reqBody) {
+          req.write(reqBody);
+        }
         req.end();
       } catch (err) {
         reject(err);
