@@ -66,7 +66,7 @@ class WorkflowEngine {
   }
 
   // Helper to execute script tool
-  executeScriptTool(tool, inputs, logCallback) {
+  executeScriptTool(tool, inputs, logCallback, timeout = null) {
     return new Promise((resolve, reject) => {
       const scriptPath = path.join(this.baseDir, tool.scriptPath);
       if (!fs.existsSync(scriptPath)) {
@@ -89,6 +89,17 @@ class WorkflowEngine {
       const child = spawn('node', args);
       let stdoutData = '';
       let stderrData = '';
+      let isTimedOut = false;
+
+      let timeoutId;
+      if (timeout) {
+        timeoutId = setTimeout(() => {
+          isTimedOut = true;
+          logCallback(`[SYSTEM] Killing process due to step timeout of ${timeout}ms`);
+          child.kill('SIGKILL');
+          reject(new Error(`Step execution timed out after ${timeout}ms`));
+        }, timeout);
+      }
 
       child.stdout.on('data', (data) => {
         stdoutData += data.toString();
@@ -103,6 +114,9 @@ class WorkflowEngine {
       });
 
       child.on('close', (code) => {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (isTimedOut) return;
+
         logCallback(`[SYSTEM] Process exited with status code ${code}`);
         if (code !== 0) {
           return reject(new Error(`Script failed with status code ${code}. Error: ${stderrData.trim()}`));
@@ -120,7 +134,7 @@ class WorkflowEngine {
   }
 
   // Helper to execute API tool
-  executeApiTool(tool, inputs, logCallback) {
+  executeApiTool(tool, inputs, logCallback, timeout = null) {
     return new Promise((resolve, reject) => {
       const urlStr = inputs.url;
       if (!urlStr) {
@@ -135,7 +149,7 @@ class WorkflowEngine {
         const protocol = urlObj.protocol === 'https:' ? https : http;
         const options = {
           method: (inputs.method || 'GET').toUpperCase(),
-          timeout: inputs.timeout || 5000,
+          timeout: timeout || inputs.timeout || 5000,
           headers: {}
         };
 
@@ -273,11 +287,12 @@ class WorkflowEngine {
           });
         }
 
+        const stepTimeout = step.timeout;
         let outputs;
         if (tool.type === 'script') {
-          outputs = await this.executeScriptTool(tool, resolvedInputs, log);
+          outputs = await this.executeScriptTool(tool, resolvedInputs, log, stepTimeout);
         } else if (tool.type === 'api') {
-          outputs = await this.executeApiTool(tool, resolvedInputs, log);
+          outputs = await this.executeApiTool(tool, resolvedInputs, log, stepTimeout);
         } else {
           throw new Error(`Unsupported tool type: ${tool.type}`);
         }
