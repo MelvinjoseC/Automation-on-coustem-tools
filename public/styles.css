@@ -31,6 +31,24 @@
   --box-shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
 }
 
+/* Light Mode Variables Override */
+body.light-mode {
+  --bg-main: #f8fafc;
+  --bg-sidebar: #ffffff;
+  --bg-card: rgba(255, 255, 255, 0.7);
+  --bg-card-hover: rgba(255, 255, 255, 0.9);
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-color-active: rgba(99, 102, 241, 0.6);
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --text-highlight: #000000;
+  
+  --success-glow: rgba(16, 185, 129, 0.08);
+  --danger-glow: rgba(244, 63, 94, 0.08);
+  --warning-glow: rgba(245, 158, 11, 0.08);
+  --running-glow: rgba(59, 130, 246, 0.08);
+}
+
 /* Reset and Base Styles */
 * {
   box-sizing: border-box;

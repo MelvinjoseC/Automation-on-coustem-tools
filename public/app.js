@@ -40,6 +40,20 @@ document.addEventListener('DOMContentLoaded', () => {
   
   document.getElementById('trigger-form').addEventListener('submit', handleTriggerSubmit);
   document.getElementById('drawer-cancel-btn').addEventListener('click', handleCancelClick);
+
+  // Theme Toggle Logic
+  const themeToggle = document.getElementById('theme-toggle');
+  if (localStorage.getItem('theme') === 'light') {
+    document.body.classList.add('light-mode');
+  }
+  themeToggle.addEventListener('click', () => {
+    document.body.classList.toggle('light-mode');
+    if (document.body.classList.contains('light-mode')) {
+      localStorage.setItem('theme', 'light');
+    } else {
+      localStorage.setItem('theme', 'dark');
+    }
+  });
 });
 
 // Setup sidebar navigation
