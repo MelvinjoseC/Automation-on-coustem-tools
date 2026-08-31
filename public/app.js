@@ -250,10 +250,34 @@ function renderHistoryTable() {
       <td class="text-muted">${dateStr}</td>
       <td>${duration}</td>
       <td><span class="status-badge ${run.status.toLowerCase()}">${run.status}</span></td>
-      <td><button class="btn secondary" style="padding: 4px 10px; font-size: 11px;">Inspect Logs</button></td>
+      <td style="display: flex; gap: 6px;">
+        <button class="btn secondary" style="padding: 4px 10px; font-size: 11px;">Inspect</button>
+        <button class="btn danger" style="padding: 4px 10px; font-size: 11px; background: var(--danger); border: none; color: white;" onclick="event.stopPropagation(); deleteRunHistory('${run.runId}')">Delete</button>
+      </td>
     `;
     tbody.appendChild(tr);
   });
+}
+
+// Delete Run History Item
+async function deleteRunHistory(runId) {
+  if (!confirm(`Are you sure you want to delete execution run ${runId.substring(0, 8)}?`)) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/runs/${runId}`, {
+      method: 'DELETE'
+    });
+    const result = await response.json();
+    if (result.success) {
+      fetchHistory();
+    } else {
+      alert(`Error deleting run: ${result.error}`);
+    }
+  } catch (err) {
+    alert(`Failed to connect to API: ${err.message}`);
+  }
 }
 
 // Render Dashboard View Right Panel (Recent Runs)
