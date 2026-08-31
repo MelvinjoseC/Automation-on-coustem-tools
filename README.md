@@ -144,3 +144,63 @@ steps:
     inputs:
       url: "https://httpbin.org/get?freed=${steps.run_cleanup.outputs.freedBytes}"
 ```
+
+---
+
+## ⚡ Advanced Engine Features
+
+ToolFlow supports advanced pipeline configuration at the step level:
+
+### 1. Extended HTTP APIs
+API tool runners support method overrides, headers, and request body payloads in YAML:
+```yaml
+inputs:
+  - name: url
+    type: string
+  - name: method
+    type: string
+  - name: headers
+    type: object
+  - name: body
+    type: object
+```
+
+### 2. Step-Level Timeouts
+Enforce execution constraints by defining step `timeout` (in milliseconds):
+```yaml
+steps:
+  - id: import_data
+    tool: data_uploader
+    timeout: 3000 # Terminated if running > 3s
+```
+
+### 3. Automatic Retries
+Support automatic retry logic upon step failure:
+```yaml
+steps:
+  - id: scrape_web
+    tool: web_scraper
+    retries: 3
+    retryDelay: 2000 # Wait 2 seconds before retry
+```
+
+### 4. Conditional Steps (`if`)
+Control the execution path dynamically using comparison expressions:
+```yaml
+steps:
+  - id: check_local_system
+    tool: system_info
+  - id: purge_temp
+    tool: disk_cleanup
+    if: "${steps.check_local_system.outputs.freeMemory} != 0"
+    inputs:
+      targetPath: "/tmp"
+```
+
+---
+
+## 🖥️ Dashboard Utilities
+
+- **Active Run Cancellation**: Cancel ongoing workflows directly from the Details Drawer. Child processes and pending HTTP requests are immediately killed and cleaned up.
+- **Run Deletion**: Purge old workflow executions from local history and disk via the table interface.
+- **Theme Toggle**: Dynamically toggle between Light Mode and Dark Mode. Preferences are automatically saved in local storage.
