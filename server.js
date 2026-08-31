@@ -92,6 +92,19 @@ app.delete('/api/runs/:runId', (req, res) => {
   }
 });
 
+// API: Cancel an active run
+app.post('/api/runs/:runId/cancel', (req, res) => {
+  try {
+    const cancelled = engine.cancelRun(req.params.runId);
+    if (!cancelled) {
+      return res.status(404).json({ error: 'Run not active or already finished' });
+    }
+    res.json({ success: true, message: 'Cancellation request sent' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // API: Trigger a workflow run
 app.post('/api/workflows/:name/run', (req, res) => {
   const { name } = req.params;

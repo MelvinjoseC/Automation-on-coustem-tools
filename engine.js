@@ -16,6 +16,7 @@ class WorkflowEngine {
     if (!fs.existsSync(this.runsDir)) {
       fs.mkdirSync(this.runsDir, { recursive: true });
     }
+    this.activeRuns = new Map();
   }
 
   // Load a tool by name
@@ -66,8 +67,13 @@ class WorkflowEngine {
   }
 
   // Helper to execute script tool
-  executeScriptTool(tool, inputs, logCallback, timeout = null) {
+  executeScriptTool(tool, inputs, logCallback, timeout = null, runId = null) {
     return new Promise((resolve, reject) => {
+      const runState = runId ? this.activeRuns.get(runId) : null;
+      if (runState && runState.cancelled) {
+        return reject(new Error('Workflow run was cancelled by user'));
+      }
+
       const scriptPath = path.join(this.baseDir, tool.scriptPath);
       if (!fs.existsSync(scriptPath)) {
         return reject(new Error(`Script not found at ${scriptPath}`));
@@ -87,6 +93,8 @@ class WorkflowEngine {
       });
 
       const child = spawn('node', args);
+      if (runState) runState.currentSpawned = child;
+
       let stdoutData = '';
       let stderrData = '';
       let isTimedOut = false;
@@ -115,6 +123,7 @@ class WorkflowEngine {
 
       child.on('close', (code) => {
         if (timeoutId) clearTimeout(timeoutId);
+        if (runState) runState.currentSpawned = null;
         if (isTimedOut) return;
 
         logCallback(`[SYSTEM] Process exited with status code ${code}`);
@@ -133,9 +142,13 @@ class WorkflowEngine {
     });
   }
 
-  // Helper to execute API tool
-  executeApiTool(tool, inputs, logCallback, timeout = null) {
+  executeApiTool(tool, inputs, logCallback, timeout = null, runId = null) {
     return new Promise((resolve, reject) => {
+      const runState = runId ? this.activeRuns.get(runId) : null;
+      if (runState && runState.cancelled) {
+        return reject(new Error('Workflow run was cancelled by user'));
+      }
+
       const urlStr = inputs.url;
       if (!urlStr) {
         return reject(new Error(`API tool requires a "url" input.`));
@@ -182,6 +195,7 @@ class WorkflowEngine {
           let body = '';
           res.on('data', (chunk) => body += chunk);
           res.on('end', () => {
+            if (runState) runState.currentRequest = null;
             const latencyMs = Date.now() - startTime;
             logCallback(`[API] Response: ${res.statusCode} ${res.statusMessage} (${latencyMs}ms)`);
             resolve({
@@ -193,12 +207,16 @@ class WorkflowEngine {
           });
         });
 
+        if (runState) runState.currentRequest = req;
+
         req.on('timeout', () => {
+          if (runState) runState.currentRequest = null;
           req.destroy();
           reject(new Error(`API request timed out after ${options.timeout}ms`));
         });
 
         req.on('error', (err) => {
+          if (runState) runState.currentRequest = null;
           reject(err);
         });
 
@@ -214,6 +232,13 @@ class WorkflowEngine {
 
   // Execute an entire workflow
   async runWorkflow(workflowName, workflowInputs = {}, runId = uuidv4()) {
+    const runState = {
+      cancelled: false,
+      currentSpawned: null,
+      currentRequest: null
+    };
+    this.activeRuns.set(runId, runState);
+
     const workflow = this.loadWorkflow(workflowName);
     const runFilePath = path.join(this.runsDir, `${runId}.json`);
     
@@ -331,11 +356,14 @@ class WorkflowEngine {
         let attempt = 0;
 
         while (true) {
+          if (runState && runState.cancelled) {
+            throw new Error('Workflow run was cancelled by user');
+          }
           try {
             if (tool.type === 'script') {
-              outputs = await this.executeScriptTool(tool, resolvedInputs, log, stepTimeout);
+              outputs = await this.executeScriptTool(tool, resolvedInputs, log, stepTimeout, runId);
             } else if (tool.type === 'api') {
-              outputs = await this.executeApiTool(tool, resolvedInputs, log, stepTimeout);
+              outputs = await this.executeApiTool(tool, resolvedInputs, log, stepTimeout, runId);
             } else {
               throw new Error(`Unsupported tool type: ${tool.type}`);
             }
@@ -364,19 +392,27 @@ class WorkflowEngine {
       runRecord.status = 'SUCCESS';
       log(`Workflow "${workflow.name}" completed successfully.`);
     } catch (error) {
-      runRecord.status = 'FAILED';
-      runRecord.error = error.message;
-      log(`Workflow execution failed: ${error.message}`);
+      if (runState && runState.cancelled) {
+        runRecord.status = 'CANCELLED';
+        log(`Workflow execution cancelled by user.`);
+      } else {
+        runRecord.status = 'FAILED';
+        runRecord.error = error.message;
+        log(`Workflow execution failed: ${error.message}`);
+      }
       
       const activeStepId = Object.keys(runRecord.steps).find(id => runRecord.steps[id].status === 'RUNNING');
       if (activeStepId) {
-        runRecord.steps[activeStepId].status = 'FAILED';
+        runRecord.steps[activeStepId].status = runState && runState.cancelled ? 'CANCELLED' : 'FAILED';
         runRecord.steps[activeStepId].endTime = new Date().toISOString();
-        runRecord.steps[activeStepId].error = error.message;
+        if (!runState || !runState.cancelled) {
+          runRecord.steps[activeStepId].error = error.message;
+        }
       }
     } finally {
       runRecord.endTime = new Date().toISOString();
       fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+      this.activeRuns.delete(runId);
     }
 
     return runRecord;
@@ -397,6 +433,31 @@ class WorkflowEngine {
       return true;
     }
     return false;
+  }
+
+  cancelRun(runId) {
+    const runState = this.activeRuns.get(runId);
+    if (!runState) return false;
+
+    runState.cancelled = true;
+    
+    if (runState.currentSpawned) {
+      try {
+        runState.currentSpawned.kill('SIGKILL');
+      } catch (e) {
+        // ignore
+      }
+    }
+    
+    if (runState.currentRequest) {
+      try {
+        runState.currentRequest.destroy();
+      } catch (e) {
+        // ignore
+      }
+    }
+    
+    return true;
   }
 
   listRuns() {
