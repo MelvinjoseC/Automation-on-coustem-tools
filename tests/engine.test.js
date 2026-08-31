@@ -77,11 +77,42 @@ async function testEngineExecution() {
   console.log('✓ Workflow Engine Execution Passed\n');
 }
 
+async function testApiAdvancedFeatures() {
+  console.log('Testing: API Advanced Features (POST, headers, body)...');
+  const engine = new WorkflowEngine(path.join(__dirname, '..'));
+
+  const tool = {
+    type: 'api'
+  };
+
+  // Test POST with body and headers
+  const inputs = {
+    url: 'https://httpbin.org/post',
+    method: 'POST',
+    headers: {
+      'X-Test-Header': 'ToolFlowValue'
+    },
+    body: {
+      message: 'hello toolflow'
+    }
+  };
+
+  const result = await engine.executeApiTool(tool, inputs, () => {});
+  assert.strictEqual(result.status, 200);
+
+  const parsedBody = JSON.parse(result.body);
+  assert.strictEqual(parsedBody.headers['X-Test-Header'], 'ToolFlowValue');
+  assert.deepStrictEqual(JSON.parse(parsedBody.data), { message: 'hello toolflow' });
+
+  console.log('✓ API Advanced Features Passed\n');
+}
+
 async function runAll() {
   try {
     await testVariableResolution();
     await testWorkflowLoading();
     await testEngineExecution();
+    await testApiAdvancedFeatures();
     console.log('All tests passed successfully!');
     process.exit(0);
   } catch (err) {
