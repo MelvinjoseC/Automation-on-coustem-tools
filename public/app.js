@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   
   document.getElementById('trigger-form').addEventListener('submit', handleTriggerSubmit);
+  document.getElementById('drawer-cancel-btn').addEventListener('click', handleCancelClick);
 });
 
 // Setup sidebar navigation
@@ -436,6 +437,28 @@ function closeDrawer() {
   fetchHistory();
 }
 
+// Handle Cancellation Request
+async function handleCancelClick() {
+  if (!activeRunId) return;
+  if (!confirm('Are you sure you want to cancel this active workflow run?')) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/runs/${activeRunId}/cancel`, {
+      method: 'POST'
+    });
+    const result = await response.json();
+    if (result.success) {
+      pollRunState();
+    } else {
+      alert(`Error cancelling run: ${result.error}`);
+    }
+  } catch (err) {
+    alert(`Failed to cancel run: ${err.message}`);
+  }
+}
+
 // Core Polling function: returns true if running, false if completed/error
 async function pollRunState() {
   if (!activeRunId) return false;
@@ -453,6 +476,14 @@ async function pollRunState() {
     const statusBadge = document.getElementById('drawer-status');
     statusBadge.className = `status-badge ${run.status.toLowerCase()}`;
     statusBadge.textContent = run.status;
+
+    // Show/hide cancel button based on run status
+    const cancelBtn = document.getElementById('drawer-cancel-btn');
+    if (run.status === 'RUNNING') {
+      cancelBtn.style.display = 'inline-block';
+    } else {
+      cancelBtn.style.display = 'none';
+    }
     
     document.getElementById('drawer-time').textContent = new Date(run.startTime).toLocaleString();
     document.getElementById('drawer-duration').textContent = calculateDuration(run.startTime, run.endTime);

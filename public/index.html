@@ -137,9 +137,12 @@
       </div>
       <div class="drawer-body">
         <div class="run-meta-row">
-          <div class="meta-item">
-            <span class="meta-label">Status</span>
-            <span id="drawer-status" class="status-badge">PENDING</span>
+          <div class="meta-item" style="display: flex; flex-direction: row; align-items: center; gap: 12px;">
+            <div>
+              <span class="meta-label" style="display: block;">Status</span>
+              <span id="drawer-status" class="status-badge">PENDING</span>
+            </div>
+            <button id="drawer-cancel-btn" class="btn danger" style="padding: 4px 8px; font-size: 11px; display: none; background: var(--danger); border: none; color: white; border-radius: 4px; cursor: pointer; font-weight: 600; margin-top: 14px;">Cancel Run</button>
           </div>
           <div class="meta-item">
             <span class="meta-label">Triggered At</span>

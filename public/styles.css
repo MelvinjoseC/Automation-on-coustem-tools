@@ -465,6 +465,25 @@ body {
   animation: pulse 1.5s infinite;
 }
 
+.status-badge.cancelled {
+  background-color: var(--danger-glow);
+  color: var(--danger);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  opacity: 0.7;
+}
+
+.status-badge.pending {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.status-badge.skipped {
+  background-color: var(--warning-glow);
+  color: var(--warning);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
 @keyframes pulse {
   0% { opacity: 0.6; }
   50% { opacity: 1; }
@@ -675,6 +694,16 @@ body {
 .step-node.running::before {
   background-color: var(--running);
   box-shadow: 0 0 6px var(--running);
+}
+
+.step-node.skipped::before {
+  background-color: var(--warning);
+  box-shadow: 0 0 6px var(--warning);
+}
+
+.step-node.cancelled::before {
+  background-color: var(--danger);
+  box-shadow: 0 0 6px var(--danger);
 }
 
 .step-node-header {
