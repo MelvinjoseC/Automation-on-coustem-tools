@@ -134,7 +134,7 @@ class WorkflowEngine {
         const urlObj = new URL(urlStr);
         const protocol = urlObj.protocol === 'https:' ? https : http;
         const options = {
-          method: 'GET',
+          method: (inputs.method || 'GET').toUpperCase(),
           timeout: inputs.timeout || 5000
         };
 
