@@ -257,6 +257,43 @@ class WorkflowEngine {
 
     try {
       for (const step of workflow.steps) {
+        if (step.if !== undefined) {
+          const condition = this.resolveValue(step.if, context);
+          let shouldExecute = false;
+
+          if (typeof condition === 'boolean') {
+            shouldExecute = condition;
+          } else if (typeof condition === 'string') {
+            const eqMatch = condition.match(/^\s*(.*?)\s*==\s*(.*?)\s*$/);
+            const neqMatch = condition.match(/^\s*(.*?)\s*!=\s*(.*?)\s*$/);
+            if (eqMatch) {
+              const left = eqMatch[1].replace(/^['"]|['"]$/g, '');
+              const right = eqMatch[2].replace(/^['"]|['"]$/g, '');
+              shouldExecute = (left === right);
+            } else if (neqMatch) {
+              const left = neqMatch[1].replace(/^['"]|['"]$/g, '');
+              const right = neqMatch[2].replace(/^['"]|['"]$/g, '');
+              shouldExecute = (left !== right);
+            } else {
+              shouldExecute = condition.trim() === 'true';
+            }
+          } else {
+            shouldExecute = !!condition;
+          }
+
+          if (!shouldExecute) {
+            log(`Skipping step "${step.id}" because condition "${step.if}" evaluated to false`);
+            runRecord.steps[step.id] = {
+              status: 'SKIPPED',
+              startTime: new Date().toISOString(),
+              endTime: new Date().toISOString(),
+              error: null
+            };
+            fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+            continue;
+          }
+        }
+
         log(`Executing step "${step.id}" (Tool: ${step.tool})`);
         
         runRecord.steps[step.id] = {
