@@ -155,6 +155,65 @@ async function testStepTimeouts() {
   }
 }
 
+async function testStepRetries() {
+  console.log('Testing: Step Retries...');
+  const engine = new WorkflowEngine(path.join(__dirname, '..'));
+
+  engine.loadWorkflow = (name) => {
+    if (name === 'retry_workflow') {
+      return {
+        name: 'retry_workflow',
+        steps: [
+          {
+            id: 'retry_step',
+            tool: 'mock_retry_tool',
+            retries: 2,
+            retryDelay: 100
+          }
+        ]
+      };
+    }
+  };
+
+  engine.loadTool = (name) => {
+    if (name === 'mock_retry_tool') {
+      return {
+        name: 'mock_retry_tool',
+        type: 'script',
+        scriptPath: 'tests/retry_helper.js'
+      };
+    }
+  };
+
+  const counterFile = path.join(__dirname, 'retry_counter.txt');
+  fs.writeFileSync(counterFile, '0');
+
+  const helperPath = path.join(__dirname, 'retry_helper.js');
+  fs.writeFileSync(helperPath, `
+    const fs = require('fs');
+    const path = require('path');
+    const file = path.join(__dirname, 'retry_counter.txt');
+    const val = parseInt(fs.readFileSync(file, 'utf8'), 10);
+    if (val < 1) {
+      fs.writeFileSync(file, String(val + 1));
+      process.exit(1); // Fail
+    } else {
+      console.log(JSON.stringify({ ok: true }));
+      process.exit(0); // Success
+    }
+  `);
+
+  try {
+    const result = await engine.runWorkflow('retry_workflow');
+    assert.strictEqual(result.status, 'SUCCESS');
+    assert.strictEqual(result.steps.retry_step.status, 'SUCCESS');
+    console.log('✓ Step Retries Passed\n');
+  } finally {
+    if (fs.existsSync(helperPath)) fs.unlinkSync(helperPath);
+    if (fs.existsSync(counterFile)) fs.unlinkSync(counterFile);
+  }
+}
+
 async function runAll() {
   try {
     await testVariableResolution();
@@ -162,6 +221,7 @@ async function runAll() {
     await testEngineExecution();
     await testApiAdvancedFeatures();
     await testStepTimeouts();
+    await testStepRetries();
     console.log('All tests passed successfully!');
     process.exit(0);
   } catch (err) {
