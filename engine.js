@@ -135,8 +135,21 @@ class WorkflowEngine {
         const protocol = urlObj.protocol === 'https:' ? https : http;
         const options = {
           method: (inputs.method || 'GET').toUpperCase(),
-          timeout: inputs.timeout || 5000
+          timeout: inputs.timeout || 5000,
+          headers: {}
         };
+
+        if (inputs.headers) {
+          if (typeof inputs.headers === 'object') {
+            options.headers = { ...inputs.headers };
+          } else if (typeof inputs.headers === 'string') {
+            try {
+              options.headers = JSON.parse(inputs.headers);
+            } catch (e) {
+              logCallback(`[WARNING] Failed to parse headers as JSON: ${e.message}`);
+            }
+          }
+        }
 
         const req = protocol.request(urlObj, options, (res) => {
           let body = '';
