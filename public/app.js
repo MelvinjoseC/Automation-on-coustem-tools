@@ -129,8 +129,39 @@ async function initApp() {
   await Promise.all([
     fetchTools(),
     fetchWorkflows(),
-    fetchHistory()
+    fetchHistory(),
+    fetchTelemetry()
   ]);
+
+  // Periodic telemetry polling every 10 seconds
+  setInterval(fetchTelemetry, 10000);
+}
+
+// Fetch System & Telemetry Metrics
+async function fetchTelemetry() {
+  try {
+    const res = await fetch('/api/metrics');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const activeEl = document.getElementById('stat-active');
+    if (activeEl) activeEl.textContent = data.activeWorkers;
+
+    const healthEl = document.getElementById('stat-health');
+    if (healthEl) {
+      healthEl.textContent = '● Online';
+      healthEl.style.color = 'var(--success)';
+    }
+
+    if (statTotal) statTotal.textContent = data.totalRuns;
+    if (statRate) statRate.textContent = `${data.successRate}%`;
+  } catch (e) {
+    const healthEl = document.getElementById('stat-health');
+    if (healthEl) {
+      healthEl.textContent = '● Offline';
+      healthEl.style.color = 'var(--danger)';
+    }
+  }
 }
 
 // Fetch Custom Tools Specifications
