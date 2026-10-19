@@ -25,8 +25,17 @@ class WorkflowEngine extends EventEmitter {
     this.activeRuns = new Map();
   }
 
+  // Sanitize path identifiers to prevent directory traversal
+  _sanitizeIdentifier(id, type = 'Identifier') {
+    if (!id || typeof id !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+      throw new Error(`Invalid ${type} format: "${id}". Must contain only alphanumeric characters, underscores, and hyphens.`);
+    }
+    return id;
+  }
+
   // Load a tool by name
   loadTool(name) {
+    this._sanitizeIdentifier(name, 'tool name');
     const yamlPath = path.join(this.toolsDir, `${name}.yaml`);
     if (!fs.existsSync(yamlPath)) {
       throw new Error(`Tool "${name}" not found at ${yamlPath}`);
@@ -41,6 +50,7 @@ class WorkflowEngine extends EventEmitter {
 
   // Load a workflow by name
   loadWorkflow(name) {
+    this._sanitizeIdentifier(name, 'workflow name');
     const yamlPath = path.join(this.workflowsDir, `${name}.yaml`);
     if (!fs.existsSync(yamlPath)) {
       throw new Error(`Workflow "${name}" not found at ${yamlPath}`);
@@ -300,6 +310,7 @@ class WorkflowEngine extends EventEmitter {
   }
   
   getRun(runId) {
+    this._sanitizeIdentifier(runId, 'run ID');
     const runFilePath = path.join(this.runsDir, `${runId}.json`);
     if (fs.existsSync(runFilePath)) {
       return JSON.parse(fs.readFileSync(runFilePath, 'utf8'));
@@ -308,6 +319,7 @@ class WorkflowEngine extends EventEmitter {
   }
 
   deleteRun(runId) {
+    this._sanitizeIdentifier(runId, 'run ID');
     const runFilePath = path.join(this.runsDir, `${runId}.json`);
     if (fs.existsSync(runFilePath)) {
       fs.unlinkSync(runFilePath);
@@ -317,6 +329,7 @@ class WorkflowEngine extends EventEmitter {
   }
 
   cancelRun(runId) {
+    this._sanitizeIdentifier(runId, 'run ID');
     const runState = this.activeRuns.get(runId);
     if (!runState) return false;
 

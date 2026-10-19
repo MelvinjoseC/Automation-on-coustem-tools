@@ -13,6 +13,43 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+// Security Headers Middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
+
+// Lightweight IP Rate Limiter for API endpoints
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const MAX_REQUESTS = 180; // 180 requests per minute
+
+app.use('/api/', (req, res, next) => {
+  if (process.env.NODE_ENV === 'test') return next();
+
+  const ip = req.ip || (req.connection && req.connection.remoteAddress) || '127.0.0.1';
+  const now = Date.now();
+  const clientData = rateLimitMap.get(ip) || { count: 0, resetTime: now + RATE_LIMIT_WINDOW };
+
+  if (now > clientData.resetTime) {
+    clientData.count = 1;
+    clientData.resetTime = now + RATE_LIMIT_WINDOW;
+  } else {
+    clientData.count++;
+  }
+
+  rateLimitMap.set(ip, clientData);
+
+  if (clientData.count > MAX_REQUESTS) {
+    return res.status(429).json({ error: 'Too many requests, please try again later.' });
+  }
+
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 const engine = new WorkflowEngine(__dirname);
