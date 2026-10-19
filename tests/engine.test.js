@@ -1,6 +1,7 @@
 const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
 const WorkflowEngine = require('../engine');
 
 async function testVariableResolution() {
@@ -52,13 +53,43 @@ async function testWorkflowLoading() {
   console.log('✓ Workflow Loading Passed\n');
 }
 
+let mockServer;
+let mockPort;
+
+function startMockServer() {
+  return new Promise((resolve, reject) => {
+    mockServer = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        res.setHeader('Content-Type', 'application/json');
+        if (req.method === 'POST') {
+          res.writeHead(200);
+          res.end(JSON.stringify({
+            headers: { 'X-Test-Header': req.headers['x-test-header'] },
+            data: body
+          }));
+        } else {
+          res.writeHead(200);
+          res.end(JSON.stringify({ status: 'ok', url: req.url }));
+        }
+      });
+    });
+    mockServer.listen(0, '127.0.0.1', () => {
+      mockPort = mockServer.address().port;
+      resolve(mockPort);
+    });
+    mockServer.on('error', reject);
+  });
+}
+
 async function testEngineExecution() {
   console.log('Testing: Workflow Engine Execution...');
   const engine = new WorkflowEngine(path.join(__dirname, '..'));
   
-  // Run mock workflow
+  // Run mock workflow with local mock server
   const result = await engine.runWorkflow('health_check_alert', {
-    pingUrl: 'https://httpbin.org/get'
+    pingUrl: `http://127.0.0.1:${mockPort}/get`
   });
   
   assert.strictEqual(result.status, 'SUCCESS');
@@ -85,9 +116,9 @@ async function testApiAdvancedFeatures() {
     type: 'api'
   };
 
-  // Test POST with body and headers
+  // Test POST with body and headers using local mock server
   const inputs = {
-    url: 'https://httpbin.org/post',
+    url: `http://127.0.0.1:${mockPort}/post`,
     method: 'POST',
     headers: {
       'X-Test-Header': 'ToolFlowValue'
@@ -281,6 +312,7 @@ async function testConditionalSteps() {
 
 async function runAll() {
   try {
+    await startMockServer();
     await testVariableResolution();
     await testWorkflowLoading();
     await testEngineExecution();
@@ -293,6 +325,10 @@ async function runAll() {
   } catch (err) {
     console.error('Test Suite Failed:', err);
     process.exit(1);
+  } finally {
+    if (mockServer) {
+      mockServer.close();
+    }
   }
 }
 

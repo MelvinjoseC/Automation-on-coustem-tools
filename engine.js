@@ -5,6 +5,7 @@ const https = require('https');
 const http = require('http');
 const yaml = require('js-yaml');
 const { v4: uuidv4 } = require('uuid');
+const ExpressionEvaluator = require('./lib/evaluator');
 
 class WorkflowEngine {
   constructor(baseDir) {
@@ -39,31 +40,11 @@ class WorkflowEngine {
 
   // Resolve template variables like ${workflow.inputs.foo} or ${steps.bar.outputs.baz}
   resolveValue(value, context) {
-    if (typeof value !== 'string') return value;
-    
-    const regex = /\${(.*?)}/g;
-    
-    // If the entire string is a single expression, we want to return its raw type (e.g. number, boolean, object)
-    const exactMatch = value.match(/^\${(.*?)}$/);
-    if (exactMatch) {
-      return this.evaluateExpression(exactMatch[1], context);
-    }
-    
-    // Otherwise, interpolate it into the string
-    return value.replace(regex, (m, expression) => {
-      const val = this.evaluateExpression(expression, context);
-      return val !== undefined ? String(val) : m;
-    });
+    return ExpressionEvaluator.resolveValue(value, context);
   }
   
   evaluateExpression(expression, context) {
-    const parts = expression.split('.');
-    let current = context;
-    for (const part of parts) {
-      if (current === undefined || current === null) return undefined;
-      current = current[part];
-    }
-    return current;
+    return ExpressionEvaluator.evaluateExpression(expression, context);
   }
 
   // Helper to execute script tool
@@ -283,28 +264,7 @@ class WorkflowEngine {
     try {
       for (const step of workflow.steps) {
         if (step.if !== undefined) {
-          const condition = this.resolveValue(step.if, context);
-          let shouldExecute = false;
-
-          if (typeof condition === 'boolean') {
-            shouldExecute = condition;
-          } else if (typeof condition === 'string') {
-            const eqMatch = condition.match(/^\s*(.*?)\s*==\s*(.*?)\s*$/);
-            const neqMatch = condition.match(/^\s*(.*?)\s*!=\s*(.*?)\s*$/);
-            if (eqMatch) {
-              const left = eqMatch[1].replace(/^['"]|['"]$/g, '');
-              const right = eqMatch[2].replace(/^['"]|['"]$/g, '');
-              shouldExecute = (left === right);
-            } else if (neqMatch) {
-              const left = neqMatch[1].replace(/^['"]|['"]$/g, '');
-              const right = neqMatch[2].replace(/^['"]|['"]$/g, '');
-              shouldExecute = (left !== right);
-            } else {
-              shouldExecute = condition.trim() === 'true';
-            }
-          } else {
-            shouldExecute = !!condition;
-          }
+          const shouldExecute = ExpressionEvaluator.evaluateCondition(step.if, context);
 
           if (!shouldExecute) {
             log(`Skipping step "${step.id}" because condition "${step.if}" evaluated to false`);
