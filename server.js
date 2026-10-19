@@ -36,6 +36,70 @@ function loadConfigsFromDir(dirPath) {
     .filter(Boolean);
 }
 
+// API: System Health Check
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor(process.uptime()),
+    nodeVersion: process.version,
+    platform: process.platform,
+    activeRuns: engine.activeRuns.size,
+    memory: {
+      heapUsedMb: Math.round((process.memoryUsage().heapUsed / 1024 / 1024) * 100) / 100,
+      heapTotalMb: Math.round((process.memoryUsage().heapTotal / 1024 / 1024) * 100) / 100,
+      rssMb: Math.round((process.memoryUsage().rss / 1024 / 1024) * 100) / 100
+    }
+  });
+});
+
+// API: System & Run Telemetry Metrics
+app.get('/api/metrics', (req, res) => {
+  try {
+    const runs = engine.listRuns();
+    const tools = loadConfigsFromDir(path.join(__dirname, 'config', 'tools'));
+    const workflows = loadConfigsFromDir(path.join(__dirname, 'config', 'workflows'));
+
+    const counts = {
+      SUCCESS: 0,
+      FAILED: 0,
+      CANCELLED: 0,
+      RUNNING: engine.activeRuns.size
+    };
+
+    let totalDurationMs = 0;
+    let completedRunsCount = 0;
+
+    runs.forEach(run => {
+      if (counts[run.status] !== undefined) {
+        counts[run.status]++;
+      }
+      if (run.startTime && run.endTime) {
+        const dur = new Date(run.endTime) - new Date(run.startTime);
+        if (dur > 0) {
+          totalDurationMs += dur;
+          completedRunsCount++;
+        }
+      }
+    });
+
+    const avgDurationMs = completedRunsCount > 0 ? Math.round(totalDurationMs / completedRunsCount) : 0;
+    const successRate = runs.length > 0 ? Math.round((counts.SUCCESS / runs.length) * 100) : 100;
+
+    res.json({
+      totalRuns: runs.length,
+      statusCounts: counts,
+      successRate,
+      avgDurationMs,
+      toolsRegistered: tools.length,
+      workflowsRegistered: workflows.length,
+      activeWorkers: engine.activeRuns.size
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // API: Get all tools
 app.get('/api/tools', (req, res) => {
   try {
