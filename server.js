@@ -5,6 +5,8 @@ const fs = require('fs');
 const yaml = require('js-yaml');
 const { v4: uuidv4 } = require('uuid');
 const WorkflowEngine = require('./engine');
+const { SchemaValidator } = require('./lib/validator');
+const DAGPlanner = require('./lib/dag');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -117,6 +119,57 @@ app.get('/api/workflows', (req, res) => {
     res.json(workflows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// API: Validate a Tool manifest
+app.post('/api/tools/validate', (req, res) => {
+  try {
+    const spec = req.body;
+    const result = SchemaValidator.validateTool(spec);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ valid: false, errors: [err.message] });
+  }
+});
+
+// API: Validate a Workflow manifest
+app.post('/api/workflows/validate', (req, res) => {
+  try {
+    const spec = req.body;
+    const tools = loadConfigsFromDir(path.join(__dirname, 'config', 'tools')).map(t => t.id);
+    const result = SchemaValidator.validateWorkflow(spec, tools);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ valid: false, errors: [err.message] });
+  }
+});
+
+// API: Dry-run a workflow (compute DAG waves and variable dependencies without execution)
+app.post('/api/workflows/:name/dry-run', (req, res) => {
+  try {
+    const { name } = req.params;
+    const inputs = req.body || {};
+    const workflow = engine.loadWorkflow(name);
+    const waves = DAGPlanner.buildExecutionPlan(workflow.steps);
+
+    res.json({
+      workflowName: workflow.name,
+      inputs,
+      totalSteps: workflow.steps.length,
+      waveCount: waves.length,
+      executionPlan: waves.map((wave, index) => ({
+        wave: index + 1,
+        parallelSteps: wave.map(s => ({
+          id: s.id,
+          tool: s.tool,
+          dependsOn: s.dependsOn || [],
+          hasCondition: !!s.if
+        }))
+      }))
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
