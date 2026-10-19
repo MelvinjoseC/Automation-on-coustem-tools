@@ -8,6 +8,7 @@ const yaml = require('js-yaml');
 const { v4: uuidv4 } = require('uuid');
 const ExpressionEvaluator = require('./lib/evaluator');
 const { ScriptExecutor, ApiExecutor, getExecutor } = require('./lib/executors');
+const { SchemaValidator, ValidationError } = require('./lib/validator');
 
 class WorkflowEngine extends EventEmitter {
   constructor(baseDir) {
@@ -29,7 +30,12 @@ class WorkflowEngine extends EventEmitter {
     if (!fs.existsSync(yamlPath)) {
       throw new Error(`Tool "${name}" not found at ${yamlPath}`);
     }
-    return yaml.load(fs.readFileSync(yamlPath, 'utf8'));
+    const parsed = yaml.load(fs.readFileSync(yamlPath, 'utf8'));
+    const validation = SchemaValidator.validateTool(parsed);
+    if (!validation.valid) {
+      throw new ValidationError(`Tool "${name}" manifest validation failed: ${validation.errors.join(', ')}`, validation.errors);
+    }
+    return parsed;
   }
 
   // Load a workflow by name
@@ -38,7 +44,12 @@ class WorkflowEngine extends EventEmitter {
     if (!fs.existsSync(yamlPath)) {
       throw new Error(`Workflow "${name}" not found at ${yamlPath}`);
     }
-    return yaml.load(fs.readFileSync(yamlPath, 'utf8'));
+    const parsed = yaml.load(fs.readFileSync(yamlPath, 'utf8'));
+    const validation = SchemaValidator.validateWorkflow(parsed);
+    if (!validation.valid) {
+      throw new ValidationError(`Workflow "${name}" manifest validation failed: ${validation.errors.join(', ')}`, validation.errors);
+    }
+    return parsed;
   }
 
   // Resolve template variables like ${workflow.inputs.foo} or ${steps.bar.outputs.baz}
