@@ -42,6 +42,27 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('trigger-form').addEventListener('submit', handleTriggerSubmit);
   document.getElementById('drawer-cancel-btn').addEventListener('click', handleCancelClick);
 
+  // Log filter and export listeners
+  const filterInput = document.getElementById('filter-logs-input');
+  if (filterInput) filterInput.addEventListener('input', renderFilteredLogs);
+  const filterSelect = document.getElementById('filter-level-select');
+  if (filterSelect) filterSelect.addEventListener('change', renderFilteredLogs);
+  const exportBtn = document.getElementById('export-run-btn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => {
+      if (!currentDrawerRun) return;
+      const blob = new Blob([JSON.stringify(currentDrawerRun, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `toolflow-run-${currentDrawerRun.runId.substring(0, 8)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  }
+
   // Theme Toggle Logic
   const themeToggle = document.getElementById('theme-toggle');
   if (localStorage.getItem('theme') === 'light') {
@@ -549,33 +570,13 @@ async function pollRunState() {
     document.getElementById('drawer-time').textContent = new Date(run.startTime).toLocaleString();
     document.getElementById('drawer-duration').textContent = calculateDuration(run.startTime, run.endTime);
     
+    currentDrawerRun = run;
+
     // Render Steps Timeline Flow
     renderStepsTimeline(run.steps);
 
-    // Render Logs Console
-    const terminal = document.getElementById('drawer-logs');
-    const wasScrolledToBottom = terminal.scrollHeight - terminal.clientHeight <= terminal.scrollTop + 20;
-    
-    if (run.logs && run.logs.length > 0) {
-      terminal.innerHTML = run.logs.map(line => {
-        // Color-code script logs
-        if (line.includes('[SYSTEM]')) return `<span style="color:var(--accent-primary)">${escapeHtml(line)}</span>`;
-        if (line.includes('[API]')) return `<span style="color:var(--accent-secondary)">${escapeHtml(line)}</span>`;
-        if (line.includes('[SCRIPT]')) return `<span style="color:#d1d5db">${escapeHtml(line)}</span>`;
-        if (line.includes('[WARNING]')) return `<span style="color:var(--warning)">${escapeHtml(line)}</span>`;
-        if (line.includes('failed') || line.includes('error') || line.includes('Failed') || line.includes('Error')) {
-          return `<span style="color:var(--danger)">${escapeHtml(line)}</span>`;
-        }
-        return `<span>${escapeHtml(line)}</span>`;
-      }).join('\n');
-    } else {
-      terminal.textContent = 'Executing...';
-    }
-
-    // Scroll to bottom lock if they were already at bottom
-    if (wasScrolledToBottom) {
-      terminal.scrollTop = terminal.scrollHeight;
-    }
+    // Render Filtered Logs Console
+    renderFilteredLogs();
 
     return run.status === 'RUNNING';
   } catch (err) {
@@ -645,4 +646,54 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.innerText = text;
   return div.innerHTML;
+}
+
+// Filter and render logs based on search text and log level
+function renderFilteredLogs() {
+  if (!currentDrawerRun || !currentDrawerRun.logs) return;
+  const filterInput = document.getElementById('filter-logs-input');
+  const filterSelect = document.getElementById('filter-level-select');
+  const filterText = (filterInput ? filterInput.value : '').toLowerCase();
+  const filterLevel = filterSelect ? filterSelect.value : 'ALL';
+
+  const terminal = document.getElementById('drawer-logs');
+  const wasScrolledToBottom = terminal.scrollHeight - terminal.clientHeight <= terminal.scrollTop + 25;
+
+  const filtered = currentDrawerRun.logs.filter(line => {
+    if (filterText && !line.toLowerCase().includes(filterText)) {
+      return false;
+    }
+    if (filterLevel === 'ERROR') {
+      return /error|failed|failure|exception/i.test(line);
+    }
+    if (filterLevel === 'WARNING') {
+      return line.includes('[WARNING]');
+    }
+    if (filterLevel === 'SYSTEM') {
+      return line.includes('[SYSTEM]');
+    }
+    if (filterLevel === 'SCRIPT') {
+      return line.includes('[SCRIPT]');
+    }
+    return true;
+  });
+
+  if (filtered.length > 0) {
+    terminal.innerHTML = filtered.map(line => {
+      if (line.includes('[SYSTEM]')) return `<span style="color:var(--accent-primary)">${escapeHtml(line)}</span>`;
+      if (line.includes('[API]')) return `<span style="color:var(--accent-secondary)">${escapeHtml(line)}</span>`;
+      if (line.includes('[SCRIPT]')) return `<span style="color:#d1d5db">${escapeHtml(line)}</span>`;
+      if (line.includes('[WARNING]')) return `<span style="color:var(--warning)">${escapeHtml(line)}</span>`;
+      if (/failed|error|Failed|Error/i.test(line)) {
+        return `<span style="color:var(--danger)">${escapeHtml(line)}</span>`;
+      }
+      return `<span>${escapeHtml(line)}</span>`;
+    }).join('\n');
+  } else {
+    terminal.innerHTML = '<span class="text-muted">No matching log entries found.</span>';
+  }
+
+  if (wasScrolledToBottom) {
+    terminal.scrollTop = terminal.scrollHeight;
+  }
 }

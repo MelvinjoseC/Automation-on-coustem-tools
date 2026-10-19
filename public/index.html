@@ -168,7 +168,20 @@
         </div>
 
         <div class="logs-section">
-          <h4>Engine & Tool Console Logs</h4>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h4>Engine & Tool Console Logs</h4>
+            <button id="export-run-btn" class="btn secondary" style="padding: 4px 10px; font-size: 11px; cursor: pointer;">Export JSON</button>
+          </div>
+          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <input type="text" id="filter-logs-input" placeholder="Search logs..." style="flex: 1; padding: 6px 10px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-surface); color: inherit;" />
+            <select id="filter-level-select" style="padding: 6px 8px; font-size: 12px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-surface); color: inherit;">
+              <option value="ALL">All Levels</option>
+              <option value="ERROR">Errors Only</option>
+              <option value="WARNING">Warnings Only</option>
+              <option value="SYSTEM">System Only</option>
+              <option value="SCRIPT">Script Only</option>
+            </select>
+          </div>
           <div class="terminal-container">
             <div class="terminal-header">
               <span class="dot red"></span>
