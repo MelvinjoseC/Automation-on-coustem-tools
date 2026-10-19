@@ -4,6 +4,7 @@ let workflows = [];
 let tools = [];
 let runs = [];
 let activePollInterval = null;
+let activeEventSource = null;
 let activeRunId = null;
 
 // DOM Elements
@@ -403,7 +404,7 @@ async function handleTriggerSubmit(e) {
   }
 }
 
-// Open drawer, pull logs, and handle live polling
+// Open drawer, pull logs, and handle live streaming with polling fallback
 async function viewRunDetails(runId) {
   activeRunId = runId;
   
@@ -418,23 +419,65 @@ async function viewRunDetails(runId) {
   document.getElementById('drawer-time').textContent = 'Loading...';
   document.getElementById('drawer-duration').textContent = 'Loading...';
   document.getElementById('drawer-steps-list').innerHTML = '<p class="text-muted">Waiting for steps...</p>';
-  document.getElementById('drawer-logs').textContent = 'Connecting log stream...';
+  document.getElementById('drawer-logs').textContent = 'Connecting real-time log stream...';
 
-  // Stop any existing pollers
+  // Stop any existing pollers or event sources
   if (activePollInterval) {
     clearInterval(activePollInterval);
+    activePollInterval = null;
+  }
+  if (activeEventSource) {
+    activeEventSource.close();
+    activeEventSource = null;
   }
 
   // Initial Fetch
   await pollRunState();
 
-  // Poll state every 1 second while running
+  // Connect SSE stream for real-time live logs
+  if (window.EventSource) {
+    try {
+      activeEventSource = new EventSource(`/api/runs/${runId}/stream`);
+
+      activeEventSource.addEventListener('log', () => {
+        pollRunState();
+      });
+
+      activeEventSource.addEventListener('step', () => {
+        pollRunState();
+      });
+
+      activeEventSource.addEventListener('end', () => {
+        pollRunState();
+        if (activeEventSource) {
+          activeEventSource.close();
+          activeEventSource = null;
+        }
+        fetchHistory();
+      });
+
+      activeEventSource.onerror = () => {
+        if (activeEventSource) {
+          activeEventSource.close();
+          activeEventSource = null;
+        }
+        startPolling();
+      };
+    } catch (e) {
+      startPolling();
+    }
+  } else {
+    startPolling();
+  }
+}
+
+function startPolling() {
+  if (activePollInterval) return;
   activePollInterval = setInterval(async () => {
     const shouldContinue = await pollRunState();
     if (!shouldContinue) {
       clearInterval(activePollInterval);
       activePollInterval = null;
-      // Refresh background history listings
       fetchHistory();
     }
   }, 1000);
@@ -444,6 +487,10 @@ async function viewRunDetails(runId) {
 function closeDrawer() {
   document.getElementById('run-drawer').classList.remove('active');
   activeRunId = null;
+  if (activeEventSource) {
+    activeEventSource.close();
+    activeEventSource = null;
+  }
   if (activePollInterval) {
     clearInterval(activePollInterval);
     activePollInterval = null;
