@@ -7,6 +7,7 @@ const { EventEmitter } = require('events');
 const yaml = require('js-yaml');
 const { v4: uuidv4 } = require('uuid');
 const ExpressionEvaluator = require('./lib/evaluator');
+const { ScriptExecutor, ApiExecutor, getExecutor } = require('./lib/executors');
 
 class WorkflowEngine extends EventEmitter {
   constructor(baseDir) {
@@ -51,165 +52,25 @@ class WorkflowEngine extends EventEmitter {
 
   // Helper to execute script tool
   executeScriptTool(tool, inputs, logCallback, timeout = null, runId = null) {
-    return new Promise((resolve, reject) => {
-      const runState = runId ? this.activeRuns.get(runId) : null;
-      if (runState && runState.cancelled) {
-        return reject(new Error('Workflow run was cancelled by user'));
-      }
-
-      const scriptPath = path.join(this.baseDir, tool.scriptPath);
-      if (!fs.existsSync(scriptPath)) {
-        return reject(new Error(`Script not found at ${scriptPath}`));
-      }
-
-      logCallback(`[SYSTEM] Spawning process: node ${tool.scriptPath}`);
-      
-      const args = [scriptPath];
-      // Format inputs as arguments e.g., --verbose or value
-      Object.keys(inputs).forEach(key => {
-        const val = inputs[key];
-        if (typeof val === 'boolean') {
-          if (val) args.push(`--${key}`);
-        } else {
-          args.push(`--${key}`, String(val));
-        }
-      });
-
-      const child = spawn('node', args);
-      if (runState) runState.currentSpawned = child;
-
-      let stdoutData = '';
-      let stderrData = '';
-      let isTimedOut = false;
-
-      let timeoutId;
-      if (timeout) {
-        timeoutId = setTimeout(() => {
-          isTimedOut = true;
-          logCallback(`[SYSTEM] Killing process due to step timeout of ${timeout}ms`);
-          child.kill('SIGKILL');
-          reject(new Error(`Step execution timed out after ${timeout}ms`));
-        }, timeout);
-      }
-
-      child.stdout.on('data', (data) => {
-        stdoutData += data.toString();
-      });
-
-      child.stderr.on('data', (data) => {
-        const lines = data.toString().split('\n');
-        lines.forEach(line => {
-          if (line.trim()) logCallback(`[SCRIPT] ${line.trim()}`);
-        });
-        stderrData += data.toString();
-      });
-
-      child.on('close', (code) => {
-        if (timeoutId) clearTimeout(timeoutId);
-        if (runState) runState.currentSpawned = null;
-        if (isTimedOut) return;
-
-        logCallback(`[SYSTEM] Process exited with status code ${code}`);
-        if (code !== 0) {
-          return reject(new Error(`Script failed with status code ${code}. Error: ${stderrData.trim()}`));
-        }
-        
-        try {
-          const parsed = JSON.parse(stdoutData.trim());
-          resolve(parsed);
-        } catch (e) {
-          logCallback(`[WARNING] Failed to parse script output as JSON. Returning raw string.`);
-          resolve({ rawOutput: stdoutData.trim() });
-        }
-      });
+    const runState = runId ? this.activeRuns.get(runId) : null;
+    return ScriptExecutor.execute({
+      baseDir: this.baseDir,
+      tool,
+      inputs,
+      logCallback,
+      timeout,
+      runState
     });
   }
 
   executeApiTool(tool, inputs, logCallback, timeout = null, runId = null) {
-    return new Promise((resolve, reject) => {
-      const runState = runId ? this.activeRuns.get(runId) : null;
-      if (runState && runState.cancelled) {
-        return reject(new Error('Workflow run was cancelled by user'));
-      }
-
-      const urlStr = inputs.url;
-      if (!urlStr) {
-        return reject(new Error(`API tool requires a "url" input.`));
-      }
-
-      logCallback(`[SYSTEM] Sending HTTP request to ${urlStr}`);
-      const startTime = Date.now();
-      
-      try {
-        const urlObj = new URL(urlStr);
-        const protocol = urlObj.protocol === 'https:' ? https : http;
-        const options = {
-          method: (inputs.method || 'GET').toUpperCase(),
-          timeout: timeout || inputs.timeout || 5000,
-          headers: {}
-        };
-
-        if (inputs.headers) {
-          if (typeof inputs.headers === 'object') {
-            options.headers = { ...inputs.headers };
-          } else if (typeof inputs.headers === 'string') {
-            try {
-              options.headers = JSON.parse(inputs.headers);
-            } catch (e) {
-              logCallback(`[WARNING] Failed to parse headers as JSON: ${e.message}`);
-            }
-          }
-        }
-
-        let reqBody = null;
-        if (inputs.body !== undefined && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method)) {
-          if (typeof inputs.body === 'object') {
-            reqBody = JSON.stringify(inputs.body);
-            if (!options.headers['content-type'] && !options.headers['Content-Type']) {
-              options.headers['Content-Type'] = 'application/json';
-            }
-          } else {
-            reqBody = String(inputs.body);
-          }
-          options.headers['Content-Length'] = Buffer.byteLength(reqBody);
-        }
-
-        const req = protocol.request(urlObj, options, (res) => {
-          let body = '';
-          res.on('data', (chunk) => body += chunk);
-          res.on('end', () => {
-            if (runState) runState.currentRequest = null;
-            const latencyMs = Date.now() - startTime;
-            logCallback(`[API] Response: ${res.statusCode} ${res.statusMessage} (${latencyMs}ms)`);
-            resolve({
-              status: res.statusCode,
-              statusText: res.statusMessage,
-              latencyMs,
-              body: body.substring(0, 1000)
-            });
-          });
-        });
-
-        if (runState) runState.currentRequest = req;
-
-        req.on('timeout', () => {
-          if (runState) runState.currentRequest = null;
-          req.destroy();
-          reject(new Error(`API request timed out after ${options.timeout}ms`));
-        });
-
-        req.on('error', (err) => {
-          if (runState) runState.currentRequest = null;
-          reject(err);
-        });
-
-        if (reqBody) {
-          req.write(reqBody);
-        }
-        req.end();
-      } catch (err) {
-        reject(err);
-      }
+    const runState = runId ? this.activeRuns.get(runId) : null;
+    return ApiExecutor.execute({
+      tool,
+      inputs,
+      logCallback,
+      timeout,
+      runState
     });
   }
 
