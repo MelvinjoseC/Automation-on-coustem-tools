@@ -1,0 +1,44 @@
+name: system_diagnostics
+description: Multi-stage automated health assessment, disk telemetry, log anomaly scanning, and remediation
+inputs:
+  - name: targetLogPath
+    type: string
+    description: Path to search for application logs
+    default: "."
+  - name: alertUrl
+    type: string
+    description: Health alert callback URL
+    default: "https://httpbin.org/status/200"
+steps:
+  - id: inspect_system
+    tool: system_info
+    inputs:
+      verbose: true
+
+  - id: check_disk
+    tool: disk_usage
+    inputs:
+      thresholdPercent: 75
+
+  - id: scan_logs
+    tool: log_analyzer
+    inputs:
+      targetPath: ${workflow.inputs.targetLogPath}
+      maxLines: 200
+
+  - id: auto_purge_temp
+    tool: disk_cleanup
+    dependsOn:
+      - check_disk
+    if: "${steps.check_disk.outputs.usedPercent} > 0"
+    inputs:
+      targetPath: "/tmp"
+
+  - id: dispatch_status
+    tool: http_ping
+    dependsOn:
+      - inspect_system
+      - scan_logs
+    inputs:
+      url: ${workflow.inputs.alertUrl}
+      timeout: 5000
