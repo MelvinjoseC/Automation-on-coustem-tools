@@ -143,6 +143,69 @@ app.get('/api/runs/:runId', (req, res) => {
   }
 });
 
+// API: Real-time Server-Sent Events (SSE) log & status stream for a run
+app.get('/api/runs/:runId/stream', (req, res) => {
+  const { runId } = req.params;
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  // Send initial snapshot
+  const initialRun = engine.getRun(runId);
+  if (initialRun) {
+    res.write(`event: snapshot\ndata: ${JSON.stringify(initialRun)}\n\n`);
+    if (initialRun.status !== 'RUNNING') {
+      res.write(`event: end\ndata: ${JSON.stringify({ status: initialRun.status })}\n\n`);
+      return res.end();
+    }
+  }
+
+  const onLog = (data) => {
+    if (data.runId === runId) {
+      res.write(`event: log\ndata: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
+  const onStepEvent = (eventName) => (data) => {
+    if (data.runId === runId) {
+      res.write(`event: step\ndata: ${JSON.stringify({ event: eventName, ...data })}\n\n`);
+    }
+  };
+
+  const onStepStart = onStepEvent('start');
+  const onStepSuccess = onStepEvent('success');
+  const onStepFailed = onStepEvent('failed');
+  const onStepSkipped = onStepEvent('skipped');
+
+  const onComplete = (data) => {
+    if (data.runId === runId) {
+      res.write(`event: end\ndata: ${JSON.stringify(data)}\n\n`);
+      cleanup();
+      res.end();
+    }
+  };
+
+  engine.on('log', onLog);
+  engine.on('step:start', onStepStart);
+  engine.on('step:success', onStepSuccess);
+  engine.on('step:failed', onStepFailed);
+  engine.on('step:skipped', onStepSkipped);
+  engine.on('workflow:complete', onComplete);
+
+  const cleanup = () => {
+    engine.removeListener('log', onLog);
+    engine.removeListener('step:start', onStepStart);
+    engine.removeListener('step:success', onStepSuccess);
+    engine.removeListener('step:failed', onStepFailed);
+    engine.removeListener('step:skipped', onStepSkipped);
+    engine.removeListener('workflow:complete', onComplete);
+  };
+
+  req.on('close', cleanup);
+});
+
 // API: Delete a specific run
 app.delete('/api/runs/:runId', (req, res) => {
   try {
