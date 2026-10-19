@@ -3,12 +3,14 @@ const path = require('path');
 const { spawn } = require('child_process');
 const https = require('https');
 const http = require('http');
+const { EventEmitter } = require('events');
 const yaml = require('js-yaml');
 const { v4: uuidv4 } = require('uuid');
 const ExpressionEvaluator = require('./lib/evaluator');
 
-class WorkflowEngine {
+class WorkflowEngine extends EventEmitter {
   constructor(baseDir) {
+    super();
     this.baseDir = baseDir;
     this.toolsDir = path.join(baseDir, 'config', 'tools');
     this.workflowsDir = path.join(baseDir, 'config', 'workflows');
@@ -240,6 +242,7 @@ class WorkflowEngine {
       runRecord.logs.push(logLine);
       console.log(`[Run ${runId.substring(0, 8)}] ${msg}`);
       fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+      this.emit('log', { runId, message: msg, logLine, timestamp });
     };
 
     log(`Starting workflow "${workflow.name}"`);
@@ -260,6 +263,7 @@ class WorkflowEngine {
     }
 
     log(`Workflow inputs: ${JSON.stringify(context.workflow.inputs)}`);
+    this.emit('workflow:start', { runId, workflowName, inputs: context.workflow.inputs });
 
     try {
       for (const step of workflow.steps) {
@@ -268,6 +272,7 @@ class WorkflowEngine {
 
           if (!shouldExecute) {
             log(`Skipping step "${step.id}" because condition "${step.if}" evaluated to false`);
+            this.emit('step:skipped', { runId, stepId: step.id, condition: step.if });
             runRecord.steps[step.id] = {
               status: 'SKIPPED',
               startTime: new Date().toISOString(),
@@ -280,6 +285,7 @@ class WorkflowEngine {
         }
 
         log(`Executing step "${step.id}" (Tool: ${step.tool})`);
+        this.emit('step:start', { runId, stepId: step.id, tool: step.tool });
         
         runRecord.steps[step.id] = {
           status: 'RUNNING',
@@ -332,8 +338,10 @@ class WorkflowEngine {
             attempt++;
             if (attempt <= retries) {
               log(`[WARNING] Step "${step.id}" failed: ${err.message}. Retrying (Attempt ${attempt}/${retries}) in ${retryDelay}ms...`);
+              this.emit('step:retry', { runId, stepId: step.id, attempt, maxRetries: retries, delay: retryDelay, error: err.message });
               await new Promise(r => setTimeout(r, retryDelay));
             } else {
+              this.emit('step:failed', { runId, stepId: step.id, tool: step.tool, error: err.message });
               throw err; // Out of retries, propagate error
             }
           }
@@ -346,19 +354,23 @@ class WorkflowEngine {
         context.steps[step.id] = { outputs };
         
         log(`Step "${step.id}" completed successfully`);
+        this.emit('step:success', { runId, stepId: step.id, tool: step.tool, outputs });
         fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
       }
 
       runRecord.status = 'SUCCESS';
       log(`Workflow "${workflow.name}" completed successfully.`);
+      this.emit('workflow:success', { runId, workflowName, runRecord });
     } catch (error) {
       if (runState && runState.cancelled) {
         runRecord.status = 'CANCELLED';
         log(`Workflow execution cancelled by user.`);
+        this.emit('workflow:cancelled', { runId, workflowName, runRecord });
       } else {
         runRecord.status = 'FAILED';
         runRecord.error = error.message;
         log(`Workflow execution failed: ${error.message}`);
+        this.emit('workflow:failed', { runId, workflowName, error: error.message, runRecord });
       }
       
       const activeStepId = Object.keys(runRecord.steps).find(id => runRecord.steps[id].status === 'RUNNING');
@@ -373,6 +385,7 @@ class WorkflowEngine {
       runRecord.endTime = new Date().toISOString();
       fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
       this.activeRuns.delete(runId);
+      this.emit('workflow:complete', { runId, workflowName, status: runRecord.status, runRecord });
     }
 
     return runRecord;
@@ -417,6 +430,7 @@ class WorkflowEngine {
       }
     }
     
+    this.emit('run:cancel', { runId });
     return true;
   }
 
