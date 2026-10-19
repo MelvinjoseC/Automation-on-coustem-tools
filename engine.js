@@ -9,6 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 const ExpressionEvaluator = require('./lib/evaluator');
 const { ScriptExecutor, ApiExecutor, getExecutor } = require('./lib/executors');
 const { SchemaValidator, ValidationError } = require('./lib/validator');
+const DAGPlanner = require('./lib/dag');
 
 class WorkflowEngine extends EventEmitter {
   constructor(baseDir) {
@@ -85,6 +86,122 @@ class WorkflowEngine extends EventEmitter {
     });
   }
 
+  // Execute a single workflow step
+  async executeStep(step, context, runRecord, runFilePath, log, runId, runState) {
+    if (runState && runState.cancelled) {
+      throw new Error('Workflow run was cancelled by user');
+    }
+
+    // Check if prerequisite dependencies succeeded
+    if (Array.isArray(step.dependsOn)) {
+      for (const depId of step.dependsOn) {
+        const depStatus = runRecord.steps[depId] ? runRecord.steps[depId].status : null;
+        if (depStatus !== 'SUCCESS') {
+          log(`Skipping step "${step.id}" because prerequisite "${depId}" had status "${depStatus}"`);
+          this.emit('step:skipped', { runId, stepId: step.id, reason: `Prerequisite "${depId}" did not succeed` });
+          runRecord.steps[step.id] = {
+            status: 'SKIPPED',
+            startTime: new Date().toISOString(),
+            endTime: new Date().toISOString(),
+            error: `Prerequisite step "${depId}" ${depStatus || 'not run'}`
+          };
+          fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+          return;
+        }
+      }
+    }
+
+    if (step.if !== undefined) {
+      const shouldExecute = ExpressionEvaluator.evaluateCondition(step.if, context);
+
+      if (!shouldExecute) {
+        log(`Skipping step "${step.id}" because condition "${step.if}" evaluated to false`);
+        this.emit('step:skipped', { runId, stepId: step.id, condition: step.if });
+        runRecord.steps[step.id] = {
+          status: 'SKIPPED',
+          startTime: new Date().toISOString(),
+          endTime: new Date().toISOString(),
+          error: null
+        };
+        fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+        return;
+      }
+    }
+
+    log(`Executing step "${step.id}" (Tool: ${step.tool})`);
+    this.emit('step:start', { runId, stepId: step.id, tool: step.tool });
+
+    runRecord.steps[step.id] = {
+      status: 'RUNNING',
+      startTime: new Date().toISOString(),
+      endTime: null,
+      error: null
+    };
+    fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+
+    const tool = this.loadTool(step.tool);
+
+    const resolvedInputs = {};
+    if (step.inputs) {
+      Object.keys(step.inputs).forEach(key => {
+        resolvedInputs[key] = this.resolveValue(step.inputs[key], context);
+      });
+    }
+
+    if (tool.inputs) {
+      tool.inputs.forEach(ti => {
+        if (resolvedInputs[ti.name] === undefined && ti.default !== undefined) {
+          resolvedInputs[ti.name] = ti.default;
+        }
+        if (ti.required && resolvedInputs[ti.name] === undefined) {
+          throw new Error(`Required tool input "${ti.name}" was not provided for step "${step.id}"`);
+        }
+      });
+    }
+
+    const stepTimeout = step.timeout;
+    const retries = typeof step.retries === 'number' ? step.retries : 0;
+    const retryDelay = typeof step.retryDelay === 'number' ? step.retryDelay : 1000;
+    let outputs;
+    let attempt = 0;
+
+    while (true) {
+      if (runState && runState.cancelled) {
+        throw new Error('Workflow run was cancelled by user');
+      }
+      try {
+        if (tool.type === 'script') {
+          outputs = await this.executeScriptTool(tool, resolvedInputs, log, stepTimeout, runId);
+        } else if (tool.type === 'api') {
+          outputs = await this.executeApiTool(tool, resolvedInputs, log, stepTimeout, runId);
+        } else {
+          throw new Error(`Unsupported tool type: ${tool.type}`);
+        }
+        break; // Success, exit retry loop
+      } catch (err) {
+        attempt++;
+        if (attempt <= retries) {
+          log(`[WARNING] Step "${step.id}" failed: ${err.message}. Retrying (Attempt ${attempt}/${retries}) in ${retryDelay}ms...`);
+          this.emit('step:retry', { runId, stepId: step.id, attempt, maxRetries: retries, delay: retryDelay, error: err.message });
+          await new Promise(r => setTimeout(r, retryDelay));
+        } else {
+          this.emit('step:failed', { runId, stepId: step.id, tool: step.tool, error: err.message });
+          throw err; // Out of retries, propagate error
+        }
+      }
+    }
+
+    runRecord.steps[step.id].status = 'SUCCESS';
+    runRecord.steps[step.id].endTime = new Date().toISOString();
+    runRecord.steps[step.id].outputs = outputs;
+
+    context.steps[step.id] = { outputs };
+
+    log(`Step "${step.id}" completed successfully`);
+    this.emit('step:success', { runId, stepId: step.id, tool: step.tool, outputs });
+    fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
+  }
+
   // Execute an entire workflow
   async runWorkflow(workflowName, workflowInputs = {}, runId = uuidv4()) {
     const runState = {
@@ -138,96 +255,15 @@ class WorkflowEngine extends EventEmitter {
     this.emit('workflow:start', { runId, workflowName, inputs: context.workflow.inputs });
 
     try {
-      for (const step of workflow.steps) {
-        if (step.if !== undefined) {
-          const shouldExecute = ExpressionEvaluator.evaluateCondition(step.if, context);
-
-          if (!shouldExecute) {
-            log(`Skipping step "${step.id}" because condition "${step.if}" evaluated to false`);
-            this.emit('step:skipped', { runId, stepId: step.id, condition: step.if });
-            runRecord.steps[step.id] = {
-              status: 'SKIPPED',
-              startTime: new Date().toISOString(),
-              endTime: new Date().toISOString(),
-              error: null
-            };
-            fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
-            continue;
-          }
+      const executionWaves = DAGPlanner.buildExecutionPlan(workflow.steps);
+      for (const wave of executionWaves) {
+        if (wave.length === 1) {
+          await this.executeStep(wave[0], context, runRecord, runFilePath, log, runId, runState);
+        } else {
+          await Promise.all(wave.map(step =>
+            this.executeStep(step, context, runRecord, runFilePath, log, runId, runState)
+          ));
         }
-
-        log(`Executing step "${step.id}" (Tool: ${step.tool})`);
-        this.emit('step:start', { runId, stepId: step.id, tool: step.tool });
-        
-        runRecord.steps[step.id] = {
-          status: 'RUNNING',
-          startTime: new Date().toISOString(),
-          endTime: null,
-          error: null
-        };
-        fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
-
-        const tool = this.loadTool(step.tool);
-        
-        const resolvedInputs = {};
-        if (step.inputs) {
-          Object.keys(step.inputs).forEach(key => {
-            resolvedInputs[key] = this.resolveValue(step.inputs[key], context);
-          });
-        }
-
-        if (tool.inputs) {
-          tool.inputs.forEach(ti => {
-            if (resolvedInputs[ti.name] === undefined && ti.default !== undefined) {
-              resolvedInputs[ti.name] = ti.default;
-            }
-            if (ti.required && resolvedInputs[ti.name] === undefined) {
-              throw new Error(`Required tool input "${ti.name}" was not provided for step "${step.id}"`);
-            }
-          });
-        }
-
-        const stepTimeout = step.timeout;
-        const retries = typeof step.retries === 'number' ? step.retries : 0;
-        const retryDelay = typeof step.retryDelay === 'number' ? step.retryDelay : 1000;
-        let outputs;
-        let attempt = 0;
-
-        while (true) {
-          if (runState && runState.cancelled) {
-            throw new Error('Workflow run was cancelled by user');
-          }
-          try {
-            if (tool.type === 'script') {
-              outputs = await this.executeScriptTool(tool, resolvedInputs, log, stepTimeout, runId);
-            } else if (tool.type === 'api') {
-              outputs = await this.executeApiTool(tool, resolvedInputs, log, stepTimeout, runId);
-            } else {
-              throw new Error(`Unsupported tool type: ${tool.type}`);
-            }
-            break; // Success, exit retry loop
-          } catch (err) {
-            attempt++;
-            if (attempt <= retries) {
-              log(`[WARNING] Step "${step.id}" failed: ${err.message}. Retrying (Attempt ${attempt}/${retries}) in ${retryDelay}ms...`);
-              this.emit('step:retry', { runId, stepId: step.id, attempt, maxRetries: retries, delay: retryDelay, error: err.message });
-              await new Promise(r => setTimeout(r, retryDelay));
-            } else {
-              this.emit('step:failed', { runId, stepId: step.id, tool: step.tool, error: err.message });
-              throw err; // Out of retries, propagate error
-            }
-          }
-        }
-
-        runRecord.steps[step.id].status = 'SUCCESS';
-        runRecord.steps[step.id].endTime = new Date().toISOString();
-        runRecord.steps[step.id].outputs = outputs;
-        
-        context.steps[step.id] = { outputs };
-        
-        log(`Step "${step.id}" completed successfully`);
-        this.emit('step:success', { runId, stepId: step.id, tool: step.tool, outputs });
-        fs.writeFileSync(runFilePath, JSON.stringify(runRecord, null, 2));
       }
 
       runRecord.status = 'SUCCESS';
