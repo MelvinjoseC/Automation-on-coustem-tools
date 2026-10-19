@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  toolflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: toolflow:latest
+    container_name: toolflow-engine
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - LOG_LEVEL=info
+    volumes:
+      # Mount run history for persistent execution logs
+      - ./runs:/app/runs
+      # Mount tool and workflow configurations for live updates without rebuilds
+      - ./config:/app/config
+      - ./scripts:/app/scripts:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

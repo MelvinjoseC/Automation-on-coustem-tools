@@ -1,0 +1,8 @@
+node_modules
+npm-debug.log
+.git
+.github
+runs/*.json
+.env
+.DS_Store
+Thumbs.db
