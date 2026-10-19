@@ -1,0 +1,24 @@
+name: log_analyzer
+description: Scan directories or log files for errors, warnings, and system anomalies
+type: script
+scriptPath: scripts/log_analyzer.js
+inputs:
+  - name: targetPath
+    type: string
+    description: Directory path or log file path to analyze
+    default: "."
+  - name: maxLines
+    type: number
+    description: Maximum tail lines to inspect per file
+    default: 500
+outputs:
+  - name: analyzedFiles
+    type: number
+  - name: errorCount
+    type: number
+  - name: warnCount
+    type: number
+  - name: hasAnomalies
+    type: boolean
+  - name: sampledErrors
+    type: object
