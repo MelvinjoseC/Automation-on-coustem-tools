@@ -1,57 +1,90 @@
 # ⚡ ToolFlow: Workflow Automation Engine for Custom Tools
 
-ToolFlow is a powerful, developer-centric workflow automation engine designed specifically to wrap, chain, and monitor custom system scripts (Python, Node.js, Shell) and HTTP APIs from a unified, modern web dashboard.
+ToolFlow is an enterprise-grade, developer-centric workflow automation engine designed specifically to wrap, chain, and monitor custom system scripts (Node.js, Python, Shell) and HTTP APIs from a unified, modern web dashboard.
 
-This framework allows developers, DevOps engineers, and QA automation specialists to transform disjointed utilities into structured, validated pipelines with real-time log streaming and execution history.
+This framework allows developers, DevOps engineers, and QA automation specialists to transform disjointed utilities into structured, validated pipelines with real-time log streaming (SSE), DAG parallel execution, and execution history.
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Architecture (v2)
 
 ```mermaid
 graph TD
-    UI[Dashboard Web UI] <-->|HTTP API| Server[Express API Server]
-    Server <-->|Trigger / Poll| Engine[Workflow Engine]
-    Engine -->|Reads Specs| Configs[YAML Tool & Workflow Manifests]
-    Engine -->|Process Spawning| Scripts[Custom Runner Scripts]
-    Engine -->|HTTP Calls| ExternalAPIs[External API Endpoints]
-    Engine -->|Persistence| Runs[JSON Run History DB]
+    UI[Dashboard Web UI] <-->|REST & Server-Sent Events| Server[Express API Server]
+    Server --> Validator[Manifest Schema Validator]
+    Server <-->|Trigger / Cancel / SSE| Engine[Workflow Engine - EventEmitter]
+    Engine --> DAG[DAG Dependency Planner]
+    DAG --> ExecWaves[Topological Execution Waves]
+    ExecWaves --> ScriptExec[Script Executor]
+    ExecWaves --> ApiExec[API Executor]
+    ScriptExec --> Scripts[CLI / Custom Scripts]
+    ApiExec --> ExternalAPIs[HTTP / HTTPS Endpoints]
+    Engine --> Logger[Structured Engine Logger]
+    Engine --> Runs[JSON Run History DB]
 ```
 
 ---
 
 ## 🚀 Key Features
 
-- **YAML-Defined Manifests**: Define your custom scripts and API endpoints with strict input validations (types, requirements, defaults).
-- **Orchestration & Chaining (DAG)**: Pass outputs from previous steps as inputs to downstream steps using dynamic variables: `${steps.step_id.outputs.output_name}`.
-- **Asynchronous Execution**: Workflows run non-blocking in the background, updating live states to disk.
-- **Live Terminal & Console Stream**: Real-time console logger with scroll locking in the UI dashboard.
-- **Visual Execution Timeline**: Inspect step durations, statuses (Success, Running, Failed), and step-specific output payloads.
-- **Minimalist Core & Glassmorphism Design**: High-performance, self-contained architecture utilizing native Node.js core modules.
+- **YAML-Defined Manifests**: Define custom scripts and API endpoints with strict schema validations (types, requirements, defaults).
+- **DAG Dependency Planning & Parallelism**: Model multi-stage pipelines with `dependsOn` arrays. Independent steps run in parallel topological waves.
+- **Advanced Expression Evaluator**: Dynamic interpolation of `${workflow.inputs.key}`, `${steps.id.outputs.key}`, `${env.VAR}`, and conditional expressions with `<, <=, >, >=, ==, !=, &&, ||`.
+- **Real-Time Log Streaming (SSE)**: Live Server-Sent Events stream (`/api/runs/:runId/stream`) with zero-latency log delivery and smart UI scroll lock.
+- **Event-Driven Core (`EventEmitter`)**: Decoupled engine architecture emitting structured lifecycle events (`workflow:start`, `step:start`, `step:success`, `step:retry`, `run:cancel`).
+- **Resilience & Execution Constraints**: Step-level timeouts, automated retry policies with configurable exponential backoff delays, and user cancellations.
+- **Enterprise Security**: Input sanitization against path traversal, IP rate limiting, and HTTP security headers (`nosniff`, `SAMEORIGIN`).
+- **Production Observability**: Built-in `/api/health` system probes, `/api/metrics` telemetry, and in-browser log search/level filtering with JSON run exports.
+- **Containerized Deployment**: Multi-stage `Dockerfile` and `docker-compose.yml` with non-root security and automated healthchecks.
 
 ---
 
 ## 🛠️ Project Structure
 
 ```text
+├── .github/workflows/
+│   └── ci.yml               # GitHub Actions CI matrix test runner
 ├── config/
-│   ├── tools/            # YAML tool schema definitions
+│   ├── tools/               # YAML tool schema definitions
 │   │   ├── system_info.yaml
-│   │   └── http_ping.yaml
-│   └── workflows/        # YAML workflow pipeline definitions
-│       └── health_check_alert.yaml
-├── public/               # Web Dashboard frontend files
+│   │   ├── http_ping.yaml
+│   │   ├── disk_cleanup.yaml
+│   │   ├── disk_usage.yaml
+│   │   ├── log_analyzer.yaml
+│   │   └── webhook_notify.yaml
+│   └── workflows/           # YAML workflow pipeline definitions
+│       ├── health_check_alert.yaml
+│       └── system_diagnostics.yaml
+├── lib/
+│   ├── dag.js               # DAG Planner & cycle detection
+│   ├── evaluator.js         # Expression & conditional evaluator
+│   ├── logger.js            # Structured logger with levels
+│   ├── validator.js         # Tool & workflow schema validator
+│   └── executors/           # Modular tool execution runners
+│       ├── index.js
+│       ├── scriptExecutor.js
+│       └── apiExecutor.js
+├── public/                  # Web Dashboard frontend files
 │   ├── index.html
 │   ├── styles.css
 │   └── app.js
-├── scripts/              # Custom runner scripts executed by tools
-│   └── system_info.js
-├── tests/                # Automated engine verification suite
-│   └── engine.test.js
-├── runs/                 # Local execution database (Git ignored)
-├── engine.js             # Core workflow execution engine
-├── server.js             # Express API server hosting dashboard and APIs
-├── package.json          # Node dependencies and scripts
+├── scripts/                 # Custom runner scripts executed by tools
+│   ├── system_info.js
+│   ├── disk_cleanup.js
+│   ├── disk_usage.js
+│   └── log_analyzer.js
+├── tests/                   # Automated verification test suites
+│   ├── runAll.js            # Master test runner
+│   ├── evaluator.test.js    # Expression evaluator unit tests
+│   ├── validator.test.js    # Schema validator unit tests
+│   ├── dag.test.js          # DAG & concurrency tests
+│   └── engine.test.js       # End-to-end engine integration tests
+├── Dockerfile               # Production multi-stage Docker container
+├── docker-compose.yml       # Container orchestration spec
+├── engine.js                # Core workflow execution engine
+├── server.js                # Express API server hosting dashboard and APIs
+├── package.json             # Node dependencies and scripts
+├── .env.example             # Environment variable template
 └── README.md
 ```
 
@@ -61,14 +94,15 @@ graph TD
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v16 or higher)
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- [npm](https://www.npmjs.com/) (v9 or higher)
 
 ### Setup & Installation
 
 1. Clone the repository and navigate to the project directory:
    ```bash
    git clone https://github.com/MelvinjoseC/Automation-on-coustem-tools.git
-   cd "Automation on coustem tools"
+   cd Automation-on-coustem-tools
    ```
 
 2. Install dependencies:
@@ -76,12 +110,12 @@ graph TD
    npm install
    ```
 
-3. Run the automated tests to verify the engine:
+3. Run the automated master test suite:
    ```bash
    npm test
    ```
 
-4. Start the local development server:
+4. Start the local server:
    ```bash
    npm start
    ```
@@ -93,114 +127,76 @@ graph TD
 
 ---
 
-## ✍️ How to Add a Custom Tool
+## 🐳 Docker Deployment
 
-To add a new custom CLI script, follow these two simple steps:
+Run ToolFlow instantly via Docker Compose:
 
-### 1. Create the Script
-Create a script in the `scripts/` folder, for example `scripts/disk_cleanup.js`. It should output its result payload as a **JSON string** to stdout:
-```javascript
-// scripts/disk_cleanup.js
-console.log(JSON.stringify({
-  cleaned: true,
-  freedBytes: 104857600
-}));
+```bash
+docker-compose up -d
 ```
 
-### 2. Define the Manifest
-Create a matching configuration manifest in `config/tools/disk_cleanup.yaml`:
-```yaml
-name: disk_cleanup
-description: Trigger custom automated directory purging
-type: script
-scriptPath: scripts/disk_cleanup.js
-inputs:
-  - name: targetPath
-    type: string
-    required: true
-outputs:
-  - name: cleaned
-    type: boolean
-  - name: freedBytes
-    type: number
-```
+The container automatically mounts `./runs` for log persistence and `./config` for live YAML editing without rebuilding.
 
 ---
 
-## 🔗 Chaining Workflows
+## 🌐 API Reference
 
-Create workflow pipelines inside `config/workflows/` using standard YAML arrays. You can pass inputs dynamically:
-
-```yaml
-name: system_hygiene
-description: Run disk cleanup and alert external endpoint
-steps:
-  - id: run_cleanup
-    tool: disk_cleanup
-    inputs:
-      targetPath: "/tmp"
-  - id: send_notification
-    tool: http_ping
-    inputs:
-      url: "https://httpbin.org/get?freed=${steps.run_cleanup.outputs.freedBytes}"
-```
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | System health check, uptime, memory metrics |
+| `GET` | `/api/metrics` | Telemetry, run success rate, active workers |
+| `GET` | `/api/tools` | List registered custom tools |
+| `POST`| `/api/tools/validate` | Validate tool YAML schema |
+| `GET` | `/api/workflows` | List registered workflows |
+| `POST`| `/api/workflows/validate` | Validate workflow YAML schema & references |
+| `POST`| `/api/workflows/:name/dry-run` | Preview DAG waves and dependencies without execution |
+| `POST`| `/api/workflows/:name/run` | Trigger workflow execution in background |
+| `GET` | `/api/runs` | List execution history |
+| `GET` | `/api/runs/:runId` | Get detailed run metadata, steps, and logs |
+| `GET` | `/api/runs/:runId/stream` | Server-Sent Events (SSE) real-time log stream |
+| `POST`| `/api/runs/:runId/cancel` | Cancel an active workflow run |
+| `DELETE`| `/api/runs/:runId` | Delete a historical run record |
 
 ---
 
-## ⚡ Advanced Engine Features
+## 🔗 DAG & Parallel Execution Spec
 
-ToolFlow supports advanced pipeline configuration at the step level:
+Declare dependencies between steps using `dependsOn`. Independent steps automatically execute in parallel waves:
 
-### 1. Extended HTTP APIs
-API tool runners support method overrides, headers, and request body payloads in YAML:
 ```yaml
-inputs:
-  - name: url
-    type: string
-  - name: method
-    type: string
-  - name: headers
-    type: object
-  - name: body
-    type: object
-```
-
-### 2. Step-Level Timeouts
-Enforce execution constraints by defining step `timeout` (in milliseconds):
-```yaml
+name: system_diagnostics
+description: Multi-stage automated health assessment
 steps:
-  - id: import_data
-    tool: data_uploader
-    timeout: 3000 # Terminated if running > 3s
-```
-
-### 3. Automatic Retries
-Support automatic retry logic upon step failure:
-```yaml
-steps:
-  - id: scrape_web
-    tool: web_scraper
-    retries: 3
-    retryDelay: 2000 # Wait 2 seconds before retry
-```
-
-### 4. Conditional Steps (`if`)
-Control the execution path dynamically using comparison expressions:
-```yaml
-steps:
-  - id: check_local_system
+  - id: inspect_system
     tool: system_info
-  - id: purge_temp
+
+  - id: check_disk
+    tool: disk_usage
+
+  # scan_logs and check_disk execute concurrently in Wave 1
+  - id: scan_logs
+    tool: log_analyzer
+    inputs:
+      targetPath: "."
+
+  # auto_purge waits for check_disk in Wave 2
+  - id: auto_purge
     tool: disk_cleanup
-    if: "${steps.check_local_system.outputs.freeMemory} != 0"
+    dependsOn:
+      - check_disk
+    if: "${steps.check_disk.outputs.usedPercent} > 80"
     inputs:
       targetPath: "/tmp"
 ```
 
 ---
 
-## 🖥️ Dashboard Utilities
+## 🤝 Contributing
 
-- **Active Run Cancellation**: Cancel ongoing workflows directly from the Details Drawer. Child processes and pending HTTP requests are immediately killed and cleaned up.
-- **Run Deletion**: Purge old workflow executions from local history and disk via the table interface.
-- **Theme Toggle**: Dynamically toggle between Light Mode and Dark Mode. Preferences are automatically saved in local storage.
+Contributions are welcome! Please check out [CONTRIBUTING.md](CONTRIBUTING.md) for details on code style, test requirements, and commit conventions.
+
+---
+
+## 📄 License
+
+ISC License.
